@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    *{box-sizing:border-box}body{margin:0;color:#17221b;font:14px/1.6 system-ui,sans-serif}
+    main{border:1px solid #dbe7df;border-radius:12px;padding:16px;background:#fff}
+    h1{margin:0 0 8px;font-size:20px}p{color:#526458}
+    button{min-height:44px;padding:8px 14px;border:0;border-radius:8px;background:#15803d;color:white;cursor:pointer}
+    button:disabled{opacity:.6;cursor:wait}button:focus-visible{outline:2px solid #17221b;outline-offset:3px}
+    pre{white-space:pre-wrap;overflow-wrap:anywhere;padding:12px;background:#f0fdf4;border-radius:8px}
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Jint + 独立代理池</h1>
+    <p>这是 Jint API 1 示例。Echo 不访问网络；检查按钮会启动宿主管理的后台任务，通过代理池访问 example.com。</p>
+    <button id="probe" type="button">检查代理池</button>
+    <pre id="result" role="status">加载中…</pre>
+  </main>
+  <script>
+    const result=document.getElementById('result'),button=document.getElementById('probe');
+    async function load(){try{result.textContent=JSON.stringify(await window.Router2API.request('GET','status'),null,2)}catch(error){result.textContent=error.message}}
+    button.onclick=async()=>{button.disabled=true;try{
+      let job=await window.Router2API.request('POST','probe',{});
+      while(job){result.textContent=JSON.stringify(job,null,2);if(!['Queued','Running'].includes(job.state))break;
+        await new Promise(resolve=>setTimeout(resolve,500));job=await window.Router2API.request('GET','status?jobId='+encodeURIComponent(job.id))}
+    }catch(error){result.textContent=error.message}finally{button.disabled=false}};
+    load();
+  </script>
+</body>
+</html>

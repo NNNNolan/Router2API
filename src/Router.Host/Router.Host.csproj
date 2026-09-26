@@ -1,0 +1,45 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <RootNamespace>Router.Host</RootNamespace>
+    <AssemblyName>Router.Host</AssemblyName>
+    <UserSecretsId>Router2API-Public</UserSecretsId>
+    <FrontendDistDirectory>$(MSBuildProjectDirectory)\..\..\web\dist</FrontendDistDirectory>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\Router.Contracts\Router.Contracts.csproj" />
+    <ProjectReference Include="..\Router.Infrastructure\Router.Infrastructure.csproj" />
+    <!-- 宿主独立构建；提供方插件由各自仓库打包，再安装到运行目录的 plugins。 -->
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.12" />
+    <PackageReference Include="OpenAI" Version="2.14.0" />
+    <PackageReference Include="Anthropic" Version="12.50.0" />
+    <PackageReference Include="Jint" Version="4.16.4" />
+  </ItemGroup>
+
+  <ItemGroup>
+      <!-- 允许直接运行 bin 目录中的 exe 时也能访问 Vue 管理后台静态文件。 -->
+    <Content Update="wwwroot\**\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <!-- turnstilePatch 浏览器扩展以解包目录形式随产物发布。 -->
+    <Content Update="Assets\**\*.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="Assets\**\*.js" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Update="Config\Config.example.json">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Always</CopyToPublishDirectory>
+    </Content>
+  </ItemGroup>
+
+  <Target Name="CopyFrontendToWwwRoot" BeforeTargets="PrepareForBuild;Publish" Condition="Exists('$(FrontendDistDirectory)')">
+    <ItemGroup>
+      <FrontendAsset Include="$(FrontendDistDirectory)\**\*" />
+    </ItemGroup>
+    <MakeDir Directories="$(MSBuildProjectDirectory)\wwwroot" />
+    <Copy SourceFiles="@(FrontendAsset)" DestinationFiles="@(FrontendAsset->'$(MSBuildProjectDirectory)\wwwroot\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+    <!-- 全新 clone 首次构建时 wwwroot 尚不存在，复制后重新登记内容项。 -->
+    <ItemGroup>
+      <Content Remove="wwwroot\**\*" />
+      <Content Include="wwwroot\**\*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    </ItemGroup>
+  </Target>
+</Project>

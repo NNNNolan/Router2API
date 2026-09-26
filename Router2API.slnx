@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Router.Contracts/Router.Contracts.csproj" />
+    <Project Path="src/Router.Infrastructure/Router.Infrastructure.csproj" />
+    <Project Path="src/Router.Host/Router.Host.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Router.Tests/Router.Tests.csproj" />
+  </Folder>
+</Solution>

@@ -1,0 +1,51 @@
+{
+  "Database": {
+    "Path": "data/router2api.db"
+  },
+  "Redis": {
+    "ConnectionString": "localhost:6379",
+    "InstanceName": "router2api:"
+  },
+  "Auth": {
+    "Admin": {
+      "Enabled": true,
+      "SessionLifetimeHours": 12,
+      "Users": [
+        {
+          "Username": "admin",
+          "Password": "",
+          "DisplayName": "Administrator",
+          "Roles": [
+            "admin"
+          ]
+        }
+      ]
+    },
+    "ApiKey": {
+      "Enabled": true,
+      "Key": ""
+    }
+  },
+  "Logging": {
+    "DataRetentionDays": 30,
+    "CleanupCron": "0 0 3 * * *",
+    "MinimumPluginLogLevel": "Information"
+  },
+  "Plugins": {
+    "Execution": {
+      "QueueTimeout": "00:00:02",
+      "SetupTimeout": "00:01:00",
+      "TotalSetupTimeout": "00:03:00",
+      "ResponseTimeout": "00:10:00",
+      "ReadIdleTimeout": "00:01:00",
+      "MapperBudget": "00:00:00.100",
+      "CompletionMapperBudget": "00:00:00.250",
+      "EndpointTimeout": "00:00:30",
+      "DrainTimeout": "00:00:10"
+    }
+  },
+  "ForwardedHeaders": {
+    "KnownProxies": "",
+    "KnownNetworks": ""
+  }
+}

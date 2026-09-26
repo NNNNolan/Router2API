@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "id": "js-proxy-demo",
+  "name": "JS 代理池示例",
+  "version": "1.0.0",
+  "runtime": "jint",
+  "hostApi": "1",
+  "entry": "server/plugin.mjs",
+  "format": "esm-bundle",
+  "platform": {
+    "name": "js-proxy-demo",
+    "displayName": "JS 代理池示例",
+    "credentialKinds": ["ApiKey"]
+  },
+  "hooks": {
+    "invoke": "invoke",
+    "getModels": "getModels",
+    "start": "start"
+  },
+  "permissions": {
+    "http": {
+      "origins": ["https://example.com"],
+      "routes": ["pool"]
+    },
+    "state": ["read", "write"],
+    "jobs": ["start", "read", "cancel"],
+    "createAnonymousAccount": true
+  },
+  "policy": { "maxAttempts": 1 },
+  "endpoints": [
+    { "method": "GET", "path": "status", "auth": "AdminSession", "handler": "status" },
+    { "method": "POST", "path": "probe", "auth": "AdminSession", "handler": "probe" }
+  ],
+  "tasks": [
+    {
+      "name": "js-proxy-demo-check",
+      "handler": "checkPool",
+      "cron": "0 0 3 * * *",
+      "description": "每天 03:00 通过代理池 GET example.com，记录传输结果",
+      "timeoutSeconds": 30
+    }
+  ],
+  "jobs": [
+    { "name": "js-proxy-demo-probe", "handler": "checkPool", "timeoutSeconds": 30, "description": "手动后台检查代理池" }
+  ],
+  "page": { "title": "JS 代理池示例", "entry": "ui/index.html" }
+}

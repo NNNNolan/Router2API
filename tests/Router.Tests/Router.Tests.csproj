@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsTestProject>true</IsTestProject>
+    <RootNamespace>Router.Tests</RootNamespace>
+    <AssemblyName>Router.Tests</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Router.Contracts\Router.Contracts.csproj" />
+    <ProjectReference Include="..\..\src\Router.Infrastructure\Router.Infrastructure.csproj" />
+    <ProjectReference Include="..\..\src\Router.Host\Router.Host.csproj" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
+    <PackageReference Include="MSTest.TestAdapter" Version="4.4.1" />
+    <PackageReference Include="MSTest.TestFramework" Version="4.4.1" />
+    <PackageReference Include="FluentAssertions" Version="8.11.0" />
+    <PackageReference Include="Moq" Version="4.20.72" />
+  </ItemGroup>
+</Project>
