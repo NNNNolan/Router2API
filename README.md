@@ -73,6 +73,8 @@ plugins/
 
 ## 发布与 Docker
 
+推送形如 `v2.0.0` 的 tag 时，GitHub Actions 会将 `src/Router.Contracts` 打成包含 DLL 的 NuGet 包 `Router.Contracts.2.0.0.nupkg`，发布到本仓库所有者的 GitHub Packages。包版本取 tag 去掉开头 `v` 后的部分；tag 应使用合法的 NuGet 版本号。工作流使用 GitHub 自动提供的 `GITHUB_TOKEN`，无需另建发布密钥。发布只打包 Contracts，不发布宿主或插件。
+
 ```powershell
 pnpm --dir web build
 dotnet publish src/Router.Host/Router.Host.csproj -c Release -o artifacts/host

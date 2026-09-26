@@ -2,5 +2,9 @@
   <PropertyGroup>
     <RootNamespace>Router.Contracts</RootNamespace>
     <AssemblyName>Router.Contracts</AssemblyName>
+    <PackageId>Router.Contracts</PackageId>
+    <Description>Public plugin contracts for Router2API.</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/NNNNolan/Router2API</RepositoryUrl>
   </PropertyGroup>
 </Project>

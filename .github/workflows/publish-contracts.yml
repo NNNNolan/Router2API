@@ -1,0 +1,25 @@
+name: Publish Router.Contracts
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+          source-url: https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json
+        env:
+          NUGET_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Pack Router.Contracts
+        run: dotnet pack src/Router.Contracts/Router.Contracts.csproj -c Release -p:Version="${GITHUB_REF_NAME#v}" -o artifacts/packages
+      - name: Publish to GitHub Packages
+        run: dotnet nuget push artifacts/packages/*.nupkg --source "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json"
