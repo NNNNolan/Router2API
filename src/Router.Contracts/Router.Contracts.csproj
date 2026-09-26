@@ -2,6 +2,7 @@
   <PropertyGroup>
     <RootNamespace>Router.Contracts</RootNamespace>
     <AssemblyName>Router.Contracts</AssemblyName>
+    <Version>2.0.0</Version>
     <PackageId>Router.Contracts</PackageId>
     <Description>Public plugin contracts for Router2API.</Description>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
