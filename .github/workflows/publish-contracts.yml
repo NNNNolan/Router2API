@@ -10,6 +10,10 @@ on:
         description: 'NuGet package version (for example 2.0.0)'
         required: true
         type: string
+      nuget_user:
+        description: 'nuget.org profile username (not email)'
+        required: true
+        type: string
 
 jobs:
   publish:
@@ -26,7 +30,7 @@ jobs:
           dotnet-version: '10.0.x'
       - name: Check nuget.org username
         env:
-          NUGET_USER: ${{ vars.NUGET_USER || secrets.NUGET_USER }}
+          NUGET_USER: ${{ inputs.nuget_user || vars.NUGET_USER || secrets.NUGET_USER }}
         run: |
           if [[ -z "$NUGET_USER" ]]; then
             echo "::error::Set NUGET_USER to your nuget.org profile username in this repository's Actions Variables or Secrets."
@@ -42,7 +46,7 @@ jobs:
         id: nuget_login
         uses: NuGet/login@v1
         with:
-          user: ${{ vars.NUGET_USER || secrets.NUGET_USER }}
+          user: ${{ inputs.nuget_user || vars.NUGET_USER || secrets.NUGET_USER }}
       - name: Publish to nuget.org
         env:
           NUGET_API_KEY: ${{ steps.nuget_login.outputs.NUGET_API_KEY }}
