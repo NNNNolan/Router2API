@@ -24,6 +24,14 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
+      - name: Check nuget.org username
+        env:
+          NUGET_USER: ${{ vars.NUGET_USER || secrets.NUGET_USER }}
+        run: |
+          if [[ -z "$NUGET_USER" ]]; then
+            echo "::error::Set NUGET_USER to your nuget.org profile username in this repository's Actions Variables or Secrets."
+            exit 1
+          fi
       - name: Pack Router.Contracts
         env:
           MANUAL_VERSION: ${{ inputs.version }}
@@ -34,7 +42,7 @@ jobs:
         id: nuget_login
         uses: NuGet/login@v1
         with:
-          user: ${{ vars.NUGET_USER }}
+          user: ${{ vars.NUGET_USER || secrets.NUGET_USER }}
       - name: Publish to nuget.org
         env:
           NUGET_API_KEY: ${{ steps.nuget_login.outputs.NUGET_API_KEY }}
