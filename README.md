@@ -73,7 +73,11 @@ plugins/
 
 ## 发布与 Docker
 
-推送形如 `v2.0.0` 的 tag 时，GitHub Actions 会将 `src/Router.Contracts` 打成包含 DLL 的 NuGet 包 `Router.Contracts.2.0.0.nupkg`，发布到本仓库所有者的 GitHub Packages。包版本取 tag 去掉开头 `v` 后的部分；tag 应使用合法的 NuGet 版本号。工作流使用 GitHub 自动提供的 `GITHUB_TOKEN`，无需另建发布密钥。发布只打包 Contracts，不发布宿主或插件。
+推送形如 `v2.0.1` 的 tag 时，GitHub Actions 会将 `src/Router.Contracts` 打成包含 DLL 的 NuGet 包并发布到 nuget.org。发布使用 [NuGet Trusted Publishing](https://learn.microsoft.com/en-us/nuget/nuget-org/trusted-publishing)：工作流通过 GitHub OIDC 获取临时发布凭据，无需保存长期 API key。
+
+首次发布前，在 nuget.org 登录目标包所有者账号，确认 `Router.Contracts` 包 ID 可用，并在 **Trusted Publishing** 中新增 GitHub 策略：Policy Name 可填 `Router2API-Contracts`（仅用于识别策略），Repository Owner 填 `NNNNolan`，Repository 填 `Router2API`，Workflow File 只填 `publish-contracts.yml`，Environment 留空；Scopes 允许发布新包和新版本，**Glob Patterns and Packages** 单独一行填 `Router.Contracts`（包 ID，不带版本号或通配符）。在 GitHub 仓库 **Settings → Secrets and variables → Actions → Variables** 新增 `NUGET_USER`，值为该 nuget.org 账号的用户名（不是邮箱）。策略的所有者与 `NUGET_USER` 对应；此变量不是发布密钥。
+
+包版本取 tag 去掉开头 `v` 后的部分；tag 应使用合法的 NuGet 版本号。已有的 `v2.0.0` tag 不会因工作流修改自动重跑，可在 Actions 中手动运行 **Publish Router.Contracts**，输入 `2.0.0`；工作流会检出对应的 `v2.0.0` tag 并发布同版本到 nuget.org。nuget.org 同一包 ID 和版本只能发布一次。发布只打包 Contracts，不发布宿主或插件。
 
 ```bash
 pnpm --dir web build
