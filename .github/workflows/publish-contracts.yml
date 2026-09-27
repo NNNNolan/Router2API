@@ -15,6 +15,10 @@ on:
         required: true
         type: string
 
+concurrency:
+  group: publish-router-contracts
+  cancel-in-progress: false
+
 jobs:
   publish:
     runs-on: ubuntu-latest
@@ -22,13 +26,30 @@ jobs:
       contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v4
+      # 手动发布旧 tag 时，比较脚本仍取自本次选择的工作流分支。
+      - name: Check out publishing tools and history
+        uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/v{0}', inputs.version) || github.ref }}
+          fetch-depth: 0
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
+      - name: Compare Contracts DLL content
+        id: changes
+        shell: pwsh
+        env:
+          MANUAL_VERSION: ${{ inputs.version }}
+          RELEASE_REF: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/v{0}', inputs.version) || github.ref }}
+        run: |
+          $version = if ($env:MANUAL_VERSION) { $env:MANUAL_VERSION } else { $env:GITHUB_REF_NAME.Substring(1) }
+          ./.github/scripts/compare-contracts.ps1 -Version $version -Revision $env:RELEASE_REF
+      - name: Check out release source
+        if: steps.changes.outputs.changed == 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.changes.outputs.revision }}
       - name: Check nuget.org username
+        if: steps.changes.outputs.changed == 'true'
         env:
           NUGET_USER: ${{ inputs.nuget_user || vars.NUGET_USER || secrets.NUGET_USER }}
         run: |
@@ -37,17 +58,19 @@ jobs:
             exit 1
           fi
       - name: Pack Router.Contracts
+        if: steps.changes.outputs.changed == 'true'
         env:
-          MANUAL_VERSION: ${{ inputs.version }}
+          PACKAGE_VERSION: ${{ steps.changes.outputs.version }}
         run: |
-          version="${MANUAL_VERSION:-${GITHUB_REF_NAME#v}}"
-          dotnet pack src/Router.Contracts/Router.Contracts.csproj -c Release -p:Version="$version" -o artifacts/packages
+          dotnet pack src/Router.Contracts/Router.Contracts.csproj -c Release -p:Version="$PACKAGE_VERSION" -o artifacts/packages
       - name: NuGet login
+        if: steps.changes.outputs.changed == 'true'
         id: nuget_login
         uses: NuGet/login@v1
         with:
           user: ${{ inputs.nuget_user || vars.NUGET_USER || secrets.NUGET_USER }}
       - name: Publish to nuget.org
+        if: steps.changes.outputs.changed == 'true'
         env:
           NUGET_API_KEY: ${{ steps.nuget_login.outputs.NUGET_API_KEY }}
-        run: dotnet nuget push artifacts/packages/*.nupkg --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json
+        run: dotnet nuget push artifacts/packages/*.nupkg --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json --skip-duplicate
