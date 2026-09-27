@@ -38,7 +38,8 @@ internal sealed class JintPackageLoader(IPluginHostFactory hosts) : IPluginPacka
                     context => terminal.InvokeEndpointAsync(endpoint.Handler, context))));
             }
             var package = new LoadedPlugin(manifest.Id, manifest.Version, Runtime, platforms, endpoints,
-                created.Select(terminal => terminal.MainPage).FirstOrDefault(page => page is not null));
+                created.Select(terminal => terminal.MainPage).FirstOrDefault(page => page is not null))
+                { Description = manifest.Description };
             package.Validate();
             return package;
         }

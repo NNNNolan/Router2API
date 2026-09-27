@@ -5,7 +5,7 @@
   "packageManager": "pnpm@12.3.4",
   "scripts": {
     "dev": "vite",
-    "build": "vue-tsc --noEmit && vite build",
+    "build": "vue-tsc --noEmit && vite build --configLoader native && node scripts/sync-host-wwwroot.mjs",
     "test": "vitest run",
     "preview": "vite preview"
   },

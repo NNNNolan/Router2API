@@ -740,6 +740,8 @@ public sealed record PluginDescriptor(
 {
     /// <summary>插件运行时类型；现有 DLL 插件默认为 dotnet。</summary>
     public string Runtime { get; init; } = "dotnet";
+    /// <summary>插件作者提供的简短说明。</summary>
+    public string? Description { get; init; }
 }
 /// <summary>表示公开契约类型 PluginHttpContext。</summary>
 

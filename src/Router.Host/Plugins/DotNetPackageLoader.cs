@@ -1,4 +1,8 @@
 using System.Reflection;
+using System.Text.Json;
+using System.Text.RegularExpressions;
+using System.Xml;
+using System.Xml.Linq;
 using Router.Contracts.Host;
 using Router.Contracts.Pipeline;
 using Router.Contracts.Plugins;
@@ -53,7 +57,8 @@ internal sealed class DotNetPackageLoader(IPluginHostFactory hosts) : IPluginPac
             package = new LoadedPlugin(pluginKey, assembly.GetName().Version?.ToString() ?? "0.0.0", Runtime, created,
                 created.SelectMany(CreateEndpoints).ToArray(),
                 created.Select(platform => (platform.Terminal as IPluginMainPageProvider)?.GetMainPage()).FirstOrDefault(page => page is not null),
-                loadContext.Unload);
+                loadContext.Unload)
+                { Description = ReadDescription(sourceDirectory, name, assembly, assemblyPath, types.Select(item => item.Type)) };
             package.Validate();
             return package;
         }
@@ -112,6 +117,57 @@ internal sealed class DotNetPackageLoader(IPluginHostFactory hosts) : IPluginPac
             .Select(path => Path.Combine(directory, Path.GetFileNameWithoutExtension(Path.GetFileNameWithoutExtension(path)) + ".dll"))
             .Where(File.Exists).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
         return manifests.Length == 1 ? manifests[0] : assemblies.Length == 1 ? assemblies[0] : null;
+    }
+
+    private static string? ReadDescription(string directory, string pluginKey, Assembly assembly,
+        string assemblyPath, IEnumerable<Type> terminalTypes)
+    {
+        var manifestPath = Path.Combine(directory, "plugin.json");
+        if (File.Exists(manifestPath))
+        {
+            if (new FileInfo(manifestPath).Length > 64 * 1024
+                || (File.GetAttributes(manifestPath) & FileAttributes.ReparsePoint) != 0)
+                throw new InvalidDataException("C# plugin manifest is too large or is a link.");
+            using var document = JsonDocument.Parse(File.ReadAllText(manifestPath), new JsonDocumentOptions { MaxDepth = 16 });
+            var root = document.RootElement;
+            if (!root.TryGetProperty("runtime", out var runtime) || runtime.GetString() != "dotnet"
+                || !root.TryGetProperty("id", out var id)
+                || !pluginKey.Equals(id.GetString(), StringComparison.OrdinalIgnoreCase))
+                throw new InvalidDataException("C# plugin manifest runtime or id does not match its directory.");
+            if (root.TryGetProperty("description", out var description)
+                && description.ValueKind == JsonValueKind.String
+                && !string.IsNullOrWhiteSpace(description.GetString()))
+                return description.GetString()!.Trim();
+        }
+
+        var assemblyDescription = assembly.GetCustomAttribute<AssemblyDescriptionAttribute>()?.Description;
+        if (!string.IsNullOrWhiteSpace(assemblyDescription)) return assemblyDescription.Trim();
+
+        var xmlPath = Path.ChangeExtension(assemblyPath, ".xml");
+        if (!File.Exists(xmlPath) || new FileInfo(xmlPath).Length > 1024 * 1024) return null;
+        try
+        {
+            using var reader = XmlReader.Create(xmlPath, new XmlReaderSettings
+            {
+                DtdProcessing = DtdProcessing.Prohibit, XmlResolver = null, MaxCharactersInDocument = 1024 * 1024
+            });
+            var document = XDocument.Load(reader);
+            foreach (var type in terminalTypes)
+            {
+                var summary = document.Descendants("member")
+                    .FirstOrDefault(item => (string?)item.Attribute("name") == "T:" + type.FullName)?
+                    .Element("summary")?.Value;
+                if (string.IsNullOrWhiteSpace(summary)) continue;
+                var normalized = Regex.Replace(summary, @"\s+", " ").Trim();
+                var end = normalized.IndexOfAny(['。', '！', '!', '?', '？', '.']);
+                return normalized[..Math.Min(normalized.Length, end is >= 0 and < 240 ? end + 1 : 240)];
+            }
+        }
+        catch (Exception exception) when (exception is IOException or XmlException or UnauthorizedAccessException)
+        {
+            // XML documentation is optional; a malformed file must not prevent the plugin from loading.
+        }
+        return null;
     }
 
     private static void ValidateContract(Assembly assembly)

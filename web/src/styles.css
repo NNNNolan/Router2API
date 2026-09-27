@@ -112,6 +112,39 @@ a { color: inherit; text-decoration: none; }
 .plugin-table-row { cursor: pointer; }
 .plugin-table-row:focus-visible { outline: 2px solid rgba(37, 99, 235, .4); outline-offset: -2px; }
 .plugin-name-cell { color: #1d4ed8; font-weight: 650; }
+.plugin-manager { display: grid; gap: 18px; min-width: 0; }
+.plugin-manager-head { border: 1px solid var(--border); box-shadow: 0 6px 20px rgba(15, 23, 42, .035); }
+.plugin-manager-headline { display: flex; align-items: center; justify-content: space-between; gap: 24px; }
+.plugin-manager-headline h2 { margin: 6px 0; color: var(--text); font-size: 26px; letter-spacing: -.03em; }
+.plugin-manager-headline p { margin: 0; color: var(--muted); font-size: 13px; }
+.plugin-manager-actions, .plugin-update-toolbar > div, .plugin-card-buttons { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.plugin-manager-tabs { min-width: 0; }
+.plugin-card-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.plugin-card { min-width: 0; border: 1px solid var(--border); box-shadow: 0 6px 20px rgba(15, 23, 42, .035); }
+.plugin-card-head, .plugin-card-meta, .plugin-card-footer, .plugin-update-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.plugin-card-symbol { display: grid; width: 38px; height: 38px; place-items: center; border-radius: 10px; background: var(--primary-soft); color: var(--primary); font-size: 13px; font-weight: 800; }
+.plugin-card h3 { margin: 17px 0 7px; color: var(--text); font-size: 18px; line-height: 1.35; }
+.plugin-card-description { min-height: 62px; margin: 0 0 18px; color: #475569; font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
+.plugin-card-meta { padding: 12px 0; border-top: 1px solid var(--border); color: var(--muted); font: 12px ui-monospace, SFMono-Regular, Consolas, monospace; }
+.plugin-card-source { min-height: 19px; overflow-wrap: anywhere; color: var(--muted); font-size: 11px; }
+.plugin-card-footer { flex-wrap: wrap; margin-top: 18px; padding-top: 13px; border-top: 1px solid var(--border); }
+.plugin-card-muted { color: var(--muted); font-size: 12px; }
+.plugin-update-toolbar { flex-wrap: wrap; margin: 4px 0 16px; color: var(--muted); font-size: 13px; }
+.plugin-update-card .plugin-card-description { min-height: 48px; }
+.plugin-manager-empty { padding: 65px 0; border: 1px dashed var(--border); border-radius: 12px; background: var(--surface); }
+.plugin-subscribe-form { display: grid; gap: 12px; }
+.plugin-subscribe-form > label { color: #334155; font-size: 12px; font-weight: 650; }
+.plugin-subscribe-row { display: flex; gap: 9px; }
+.plugin-subscribe-row .n-input { min-width: 0; }
+.plugin-choice-list { display: grid; gap: 8px; max-height: 340px; overflow: auto; }
+.plugin-choice { display: flex; align-items: flex-start; gap: 12px; padding: 12px; border: 1px solid var(--border); border-radius: 9px; cursor: pointer; }
+.plugin-choice:hover { border-color: #93c5fd; background: #f8fbff; }
+.plugin-choice > span { display: grid; gap: 4px; min-width: 0; }
+.plugin-choice strong { color: var(--text); font-size: 13px; }
+.plugin-choice small { color: var(--muted); font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
+.plugin-choice:focus-within { outline: 2px solid #60a5fa; outline-offset: 2px; }
+@media (max-width: 1100px) { .plugin-card-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 700px) { .plugin-manager-headline { align-items: flex-start; flex-direction: column; } .plugin-card-grid { grid-template-columns: 1fr; } .plugin-card-description { min-height: 0; } .plugin-update-toolbar { align-items: flex-start; } }
 .task-modal-meta { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; color: var(--muted); font-size: 12px; }
 .task-cron { padding: 3px 6px; color: #1e40af; background: #eff6ff; border-radius: 5px; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
 .request-detail-modal, .request-detail-modal .n-card { display: flex; flex-direction: column; min-height: 0; }

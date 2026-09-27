@@ -21,7 +21,7 @@
 
 ## 本地开发
 
-需要 .NET 10 SDK、PowerShell 7、Node 22/24 LTS 和项目声明版本的 pnpm。
+需要 .NET 10 SDK、PowerShell 7、Node 22.18+/24 LTS 和项目声明版本的 pnpm。
 运行 jsdom 30 页面测试时，Node 需满足 `^22.22.2 || ^24.15.0 || >=26.0.0`；建议直接使用对应 LTS 的最新补丁版。
 
 ```powershell
@@ -33,7 +33,7 @@ pnpm --dir web build
 dotnet build Router2API.slnx --disable-build-servers -m:1 -p:ConcurrentBuild=false -p:UseSharedCompilation=false
 ```
 
-前端源代码在 `web`，构建产物不提交。宿主构建会把 `web/dist` 复制到 `wwwroot`，包括首次 clone 的构建；Docker 也从源码构建前端。不安装任何插件时，管理后台仍可启动，但没有提供方模型。
+前端源代码在 `web`，构建产物不提交。`pnpm --dir web build` 会生成 `web/dist` 并同步覆盖 `src/Router.Host/wwwroot`；随后构建宿主会将静态文件复制到运行目录。Docker 也从源码构建前端。不安装任何插件时，管理后台仍可启动，但没有提供方模型。
 
 ### 第一次启动先设置新凭据
 
@@ -61,6 +61,8 @@ dotnet run --project src/Router.Host/Router.Host.csproj --no-build --no-launch-p
 - 发布程序是发布目录下的 `plugins`；
 - 容器是 `/app/plugins`，Compose 映射到 `volumes/plugins`。
 
+宿主启动和手动重载时会检查并创建 `plugins/` 与 `plugins/subscription/`；订阅数据文件在首次添加仓库时写入。
+
 在对应插件仓库构建完整发行包，再复制到上述目录并从管理页重载：
 
 ```text
@@ -71,9 +73,11 @@ plugins/
 
 不要复制源码、node_modules、账号数据或多个插件混合的 bin 目录。初次安装复制新目录；升级先备份完整旧包，再安排维护窗口替换/重载。失败重载是否保留旧版本需检查实际状态和日志，不能只看 HTTP 200。
 
+插件管理页现可添加公开 GitHub 仓库，选择 Release 版本和其中的部分插件下载安装；“插件更新”页签可逐项选择要更新的已订阅插件。订阅记录保存于运行目录的 `plugins/subscription/subscriptions.json`，不进数据库。插件卡片展示简介、运行状态，并提供启用、禁用和删除操作。发行索引格式见 [插件发行索引](sdk/PLUGIN-RELEASES.md)。手工安装方式仍可用于没有发行索引的插件；C# 手工包的描述优先读取包内 `plugin.json`，再读取 DLL 的程序集描述，最后尝试入口类型的 XML 文档摘要。JS 手工包读取 `plugin.json` 的 `description`。
+
 ## 发布与 Docker
 
-推送形如 `v2.0.1` 的 tag 时，GitHub Actions 会将 `src/Router.Contracts` 打成包含 DLL 的 NuGet 包并发布到 nuget.org。发布使用 [NuGet Trusted Publishing](https://learn.microsoft.com/en-us/nuget/nuget-org/trusted-publishing)：工作流通过 GitHub OIDC 获取临时发布凭据，无需保存长期 API key。
+推送形如 `v2.0.1` 的 tag 时，[宿主 Release 工作流](.github/workflows/release-host.yml)会创建同名 GitHub Release，标题为 `Router2API v2.0.1`，正文由 GitHub 自动生成；目前仅发布 Release 页面，不上传宿主二进制包。独立的 Contracts 工作流会将 `src/Router.Contracts` 打成包含 DLL 的 NuGet 包并发布到 nuget.org。NuGet 发布使用 [NuGet Trusted Publishing](https://learn.microsoft.com/en-us/nuget/nuget-org/trusted-publishing)：工作流通过 GitHub OIDC 获取临时发布凭据，无需保存长期 API key。
 
 首次发布前，在 nuget.org 登录目标包所有者账号，确认 `Router.Contracts` 包 ID 可用，并在 **Trusted Publishing** 中新增 GitHub 策略：Policy Name 可填 `Router2API-Contracts`（仅用于识别策略），Repository Owner 填 `NNNNolan`，Repository 填 `Router2API`，Workflow File 只填 `publish-contracts.yml`，Environment 留空；Scopes 允许发布新包和新版本，**Glob Patterns and Packages** 单独一行填 `Router.Contracts`（包 ID，不带版本号或通配符）。在 GitHub 仓库 **Settings → Secrets and variables → Actions → Variables** 新增仓库变量 `NUGET_USER`，值为该 nuget.org 账号的用户名（不是邮箱）；若已把它放在同页面的 **Secrets** 中，工作流也可读取。不要只设置在未被此任务使用的 GitHub Environment 下。策略的所有者与 `NUGET_USER` 对应；此值不是发布密钥。
 

@@ -11,6 +11,7 @@ internal sealed record JsPluginManifest
     public int SchemaVersion { get; init; }
     public string Id { get; init; } = "";
     public string Name { get; init; } = "";
+    public string? Description { get; init; }
     public string Version { get; init; } = "";
     public string Runtime { get; init; } = "";
     public string HostApi { get; init; } = "";

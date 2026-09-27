@@ -478,6 +478,7 @@ public static class ApiEndpoints
             {
                 descriptor.PluginKey,
                 descriptor.Name,
+                descriptor.Description,
                 descriptor.Version,
                 descriptor.Runtime,
                 descriptor.HasMainPage,

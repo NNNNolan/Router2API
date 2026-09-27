@@ -1,0 +1,19 @@
+name: Release Router2API
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          name: Router2API ${{ github.ref_name }}
+          generate_release_notes: true

@@ -48,6 +48,7 @@ internal sealed class LoadedPlugin(
     public string PluginKey { get; } = pluginKey;
     public string Version { get; } = version;
     public string Runtime { get; } = runtime;
+    public string? Description { get; init; }
     public IReadOnlyList<LoadedPlatform> Platforms { get; } = platforms;
     public IReadOnlyList<PluginEndpointDefinition> Endpoints { get; } = endpoints;
     public PluginMainPage? MainPage { get; } = mainPage;
@@ -121,7 +122,8 @@ internal sealed class LoadedPlugin(
             .Select(task => new PluginTaskDescriptor(task.Name, task.Cron, task.Description))
             .DistinctBy(task => task.Name, StringComparer.OrdinalIgnoreCase).ToArray(),
         Routes: Endpoints.Where(endpoint => endpoint.Auth != PluginAuthPolicy.Internal)
-            .Select(endpoint => endpoint.Route).Distinct(StringComparer.OrdinalIgnoreCase).ToArray()) { Runtime = Runtime };
+            .Select(endpoint => endpoint.Route).Distinct(StringComparer.OrdinalIgnoreCase).ToArray())
+        { Runtime = Runtime, Description = Description };
 
     public void Validate()
     {

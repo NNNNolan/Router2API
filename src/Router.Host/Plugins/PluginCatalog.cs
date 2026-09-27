@@ -48,6 +48,108 @@ public sealed class PluginCatalog(
     public PluginMainPage? GetMainPage(string pluginKey)
         => _plugins.TryGetValue(pluginKey, out var plugin) ? plugin.MainPage : null;
 
+    public async Task InstallPackageAsync(PluginReleaseEntry entry, string packageDirectory, CancellationToken cancellationToken)
+    {
+        var pluginKey = entry.Id;
+        if (!SafePluginKey(pluginKey)) throw new ArgumentException("Invalid plugin key.", nameof(entry));
+        await _reloadLock.WaitAsync(cancellationToken);
+        try
+        {
+            Directory.CreateDirectory(_pluginRoot);
+            var target = Path.Combine(_pluginRoot, pluginKey);
+            var backup = Path.Combine(_pluginRoot, ".backup", pluginKey + "-" + Guid.NewGuid().ToString("N"));
+            var previous = _plugins.TryGetValue(pluginKey, out var old) ? old : null;
+            var previousDescriptor = previous?.Descriptor;
+            var wasDisabled = File.Exists(Path.Combine(DisabledPluginRoot, pluginKey + ".disabled"));
+            if (Directory.Exists(target))
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(backup)!);
+                Directory.Move(target, backup);
+            }
+            try
+            {
+                Directory.Move(packageDirectory, target);
+                if (wasDisabled)
+                {
+                    await KeepDisabledAsync(pluginKey, target, cancellationToken);
+                    var disabled = _plugins[pluginKey];
+                    if (disabled.Descriptor.State != "Disabled")
+                        throw new InvalidOperationException("Plugin is busy; previous package restored.");
+                    disabled.Descriptor = disabled.Descriptor with
+                    {
+                        Name = entry.Name, Version = entry.Version, Description = entry.Description,
+                        Runtime = entry.Runtime, State = "Disabled", DirectoryPath = target
+                    };
+                    await File.WriteAllTextAsync(Path.Combine(DisabledPluginRoot, pluginKey + ".disabled"),
+                        JsonSerializer.Serialize(disabled.Descriptor), cancellationToken);
+                }
+                else await LoadDirectoryAsync(pluginKey, target, cancellationToken);
+                if (!wasDisabled && (!_plugins.TryGetValue(pluginKey, out var current)
+                    || current.Descriptor.State != "Active" || ReferenceEquals(current, previous)))
+                    throw new InvalidOperationException("Plugin activation failed; previous package restored.");
+            }
+            catch
+            {
+                if (Directory.Exists(target)) Directory.Delete(target, recursive: true);
+                if (Directory.Exists(backup)) Directory.Move(backup, target);
+                if (previous is null) _plugins.TryRemove(pluginKey, out _);
+                else
+                {
+                    var previousWasUnloaded = previous.Descriptor.State == "Unloaded";
+                    previous.Descriptor = previousDescriptor!;
+                    _plugins[pluginKey] = previous;
+                    if (previousDescriptor!.State == "Active" && previousWasUnloaded)
+                    {
+                        _plugins.TryRemove(pluginKey, out _);
+                        await LoadDirectoryAsync(pluginKey, target, CancellationToken.None);
+                    }
+                }
+                throw;
+            }
+            try { if (Directory.Exists(backup)) Directory.Delete(backup, recursive: true); }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            { logger.LogWarning(exception, "failed to delete plugin backup path={Path}", backup); }
+        }
+        finally { _reloadLock.Release(); }
+    }
+
+    public async Task<bool> RemovePackageAsync(string pluginKey, CancellationToken cancellationToken)
+    {
+        if (!SafePluginKey(pluginKey)) return false;
+        await _reloadLock.WaitAsync(cancellationToken);
+        try
+        {
+            var directory = Path.Combine(_pluginRoot, pluginKey);
+            if (!Directory.Exists(directory)) return false;
+            var removed = Path.Combine(_pluginRoot, ".removed", pluginKey + "-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(Path.GetDirectoryName(removed)!);
+            Directory.Move(directory, removed);
+            try
+            {
+                if (_plugins.TryGetValue(pluginKey, out var plugin)
+                    && !await DrainAndUnloadAsync(plugin, cancellationToken))
+                    throw new InvalidOperationException("Plugin is busy; removal failed.");
+                File.Delete(Path.Combine(DisabledPluginRoot, pluginKey + ".disabled"));
+                _plugins.TryRemove(pluginKey, out _);
+            }
+            catch
+            {
+                Directory.Move(removed, directory);
+                throw;
+            }
+            try { Directory.Delete(removed, recursive: true); }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            { logger.LogWarning(exception, "failed to delete removed plugin path={Path}", removed); }
+            return true;
+        }
+        finally { _reloadLock.Release(); }
+    }
+
+    private static bool SafePluginKey(string value)
+        => !string.IsNullOrEmpty(value) && value.Length <= 64 && value != "subscription"
+            && value[0] is >= 'a' and <= 'z' or >= '0' and <= '9'
+            && value.All(character => character is >= 'a' and <= 'z' or >= '0' and <= '9' or '-' or '_' or '.');
+
     public async Task<PluginDescriptor?> SetEnabledAsync(
         string pluginKey,
         bool enabled,
@@ -105,13 +207,14 @@ public sealed class PluginCatalog(
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
+            Directory.CreateDirectory(_pluginRoot);
+            Directory.CreateDirectory(Path.Combine(_pluginRoot, "subscription"));
             CleanStaleStagingOnStartup();
 
-            var sourceDirectories = Directory.Exists(_pluginRoot)
-                ? Directory.EnumerateDirectories(_pluginRoot)
-                    .Where(path => !Path.GetFileName(path).StartsWith('.'))
-                    .ToArray()
-                : Array.Empty<string>();
+            var sourceDirectories = Directory.EnumerateDirectories(_pluginRoot)
+                .Where(path => !Path.GetFileName(path).StartsWith('.')
+                    && !Path.GetFileName(path).Equals("subscription", StringComparison.OrdinalIgnoreCase))
+                .ToArray();
             var installedNames = sourceDirectories
                 .Select(Path.GetFileName)
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);

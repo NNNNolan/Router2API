@@ -72,6 +72,8 @@ export interface PluginDescriptor {
   pluginKey: string
   name: string
   version: string
+  description: string | null
+  runtime: string
   state: string
   directoryPath: string
   loadedAt: string
@@ -82,6 +84,13 @@ export interface PluginDescriptor {
   tasks: PluginTask[]
   routes: string[]
 }
+
+export interface PluginRepository { owner: string; repo: string }
+export interface PluginReleaseSummary { tag: string; publishedAt: string | null }
+export interface PluginReleaseEntry { id: string; name: string; description: string; runtime: string; version: string; asset: string; sha256: string; contentSha256?: string | null; sizeBytes: number }
+export interface PluginReleaseIndex { schemaVersion: number; tag: string; plugins: PluginReleaseEntry[] }
+export interface PluginInstallation { pluginId: string; owner: string; repo: string; tag: string; sha256: string; contentSha256?: string | null; description: string }
+export interface PluginAvailableUpdate { installed: PluginInstallation; available: PluginReleaseEntry; tag: string }
 
 export interface ModelDescriptor { id: string; displayName: string; platform?: string; contextWindow?: number; inputLimit?: number; outputLimit?: number; supportsStreaming?: boolean; supportsEmbeddings?: boolean; supportsReasoning?: boolean; reasoningLevels?: string[]; reasoningTokenLimit?: number | null }
 export interface ModelPlazaModel {
@@ -153,7 +162,7 @@ function normalizeSubscription(value: unknown): ProxySubscription {
 function normalizePlugin(value: unknown): PluginDescriptor {
   const raw = asObject(value)
   const tasks = asArray(pick(raw, 'tasks')).map(item => { const task = asObject(item); return { name: asString(pick(task, 'name')) ?? '', cron: asString(pick(task, 'cron')) ?? '', description: asString(pick(task, 'description')) } })
-  return { pluginKey: asString(pick(raw, 'pluginKey', 'name')) ?? '', name: asString(pick(raw, 'name', 'pluginKey')) ?? '', version: asString(pick(raw, 'version')) ?? '', state: asString(pick(raw, 'state')) ?? '', directoryPath: asString(pick(raw, 'directoryPath')) ?? '', loadedAt: asString(pick(raw, 'loadedAt')) ?? '', inFlight: asNumber(pick(raw, 'inFlight')) ?? 0, hasMainPage: asBoolean(pick(raw, 'hasMainPage')) ?? false, mainPageTitle: asString(pick(raw, 'mainPageTitle')), mainPageVersion: asString(pick(raw, 'mainPageVersion')), tasks, routes: asArray(pick(raw, 'routes')).map(asString).filter((route): route is string => route !== null) }
+  return { pluginKey: asString(pick(raw, 'pluginKey', 'name')) ?? '', name: asString(pick(raw, 'name', 'pluginKey')) ?? '', version: asString(pick(raw, 'version')) ?? '', description: asString(pick(raw, 'description')), runtime: asString(pick(raw, 'runtime')) ?? 'dotnet', state: asString(pick(raw, 'state')) ?? '', directoryPath: asString(pick(raw, 'directoryPath')) ?? '', loadedAt: asString(pick(raw, 'loadedAt')) ?? '', inFlight: asNumber(pick(raw, 'inFlight')) ?? 0, hasMainPage: asBoolean(pick(raw, 'hasMainPage')) ?? false, mainPageTitle: asString(pick(raw, 'mainPageTitle')), mainPageVersion: asString(pick(raw, 'mainPageVersion')), tasks, routes: asArray(pick(raw, 'routes')).map(asString).filter((route): route is string => route !== null) }
 }
 
 function normalizeModelPlaza(value: unknown): ModelPlazaResponse {
@@ -228,8 +237,16 @@ export const api = {
   pluginManifest: (pluginKey: string) => request<PluginDescriptor>(`/api/admin/plugins/${encodeURIComponent(pluginKey)}/manifest`),
   pluginPage: (pluginKey: string) => request<string>(`/api/admin/plugins/${encodeURIComponent(pluginKey)}/page`),
   runPluginTask: (pluginKey: string, taskName: string) => request<void>(`/api/admin/plugins/${encodeURIComponent(pluginKey)}/tasks/${encodeURIComponent(taskName)}/run`, { method: 'POST' }),
-  reloadPlugins: async () => (asArray(await request<unknown>('/api/admin/plugins/reload')).map(normalizePlugin)),
+  reloadPlugins: async () => (asArray(await request<unknown>('/api/admin/plugins/reload', { method: 'POST' })).map(normalizePlugin)),
   setPluginEnabled: (pluginKey: string, enabled: boolean) => request<PluginDescriptor>(`/api/admin/plugins/${encodeURIComponent(pluginKey)}/state`, { method: 'POST', body: { enabled } }),
+  deletePlugin: (pluginKey: string) => request<void>(`/api/admin/plugins/${encodeURIComponent(pluginKey)}`, { method: 'DELETE' }),
+  pluginRepositories: () => request<PluginRepository[]>('/api/admin/plugin-repositories'),
+  addPluginRepository: (owner: string, repo: string) => request<PluginRepository>('/api/admin/plugin-repositories', { method: 'POST', body: { owner, repo } }),
+  pluginReleases: (owner: string, repo: string) => request<PluginReleaseSummary[]>(`/api/admin/plugin-repositories/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/releases`),
+  pluginReleaseIndex: (owner: string, repo: string, tag: string) => request<PluginReleaseIndex>(`/api/admin/plugin-repositories/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/releases/${encodeURIComponent(tag)}`),
+  installPlugins: (owner: string, repo: string, tag: string, pluginIds: string[]) => request<{ installed: string[] }>('/api/admin/plugin-repositories/install', { method: 'POST', body: { owner, repo, tag, pluginIds } }),
+  pluginInstallations: () => request<PluginInstallation[]>('/api/admin/plugin-installations'),
+  pluginUpdates: () => request<PluginAvailableUpdate[]>('/api/admin/plugin-updates'),
   models: () => request<{ data: ModelDescriptor[] }>('/v1/models'),
   modelPlaza: async () => normalizeModelPlaza(await request<unknown>('/api/admin/model-plaza')),
   refreshModelPlaza: async () => normalizeModelPlaza(await request<unknown>('/api/admin/model-plaza/refresh', { method: 'POST' })),

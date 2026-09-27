@@ -59,6 +59,7 @@ builder.Services.AddRouterInfrastructure(builder.Configuration);
 builder.Services.AddSingleton<RouterPipeline>();
 builder.Services.AddSingleton<PluginCatalog>();
 builder.Services.AddSingleton<IPluginCatalog>(sp => sp.GetRequiredService<PluginCatalog>());
+builder.Services.AddSingleton<PluginReleaseService>();
 builder.Services.AddSingleton<PluginTaskRunner>();
 builder.Services.AddSingleton<IPluginTaskInvoker>(sp => sp.GetRequiredService<PluginTaskRunner>());
 builder.Services.AddHostedService<PluginScheduledTaskHostedService>();
@@ -103,6 +104,7 @@ if (hasFrontend)
 }
 
 ApiEndpoints.Map(app);
+PluginReleaseEndpoints.Map(app);
 catalog.MapEndpoints(app);
 
 if (hasFrontend)
