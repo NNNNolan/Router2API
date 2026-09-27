@@ -16,7 +16,8 @@ public sealed class AccountService(
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var entity = database.Scope.Queryable<AccountEntity>()
+        using var db = database.CreateClient();
+        var entity = db.Queryable<AccountEntity>()
             .First(x => x.Id == id && x.PluginKey == pluginKey);
         return Task.FromResult(entity?.ToDomain());
     }
@@ -24,7 +25,8 @@ public sealed class AccountService(
     public Task<Account?> GetAnyAsync(string id, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var entity = database.Scope.Queryable<AccountEntity>().First(x => x.Id == id);
+        using var db = database.CreateClient();
+        var entity = db.Queryable<AccountEntity>().First(x => x.Id == id);
         return Task.FromResult(entity?.ToDomain());
     }
 
@@ -34,7 +36,8 @@ public sealed class AccountService(
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var query = database.Scope.Queryable<AccountEntity>()
+        using var db = database.CreateClient();
+        var query = db.Queryable<AccountEntity>()
             .Where(x => x.PluginKey == pluginKey);
         if (!string.IsNullOrWhiteSpace(platform))
             query = query.Where(x => x.Platform == platform);
@@ -53,7 +56,8 @@ public sealed class AccountService(
         cancellationToken.ThrowIfCancellationRequested();
         var page = Math.Max(1, query.Page);
         var pageSize = NormalizePageSize(query.PageSize);
-        var source = database.Scope.Queryable<AccountEntity>();
+        using var db = database.CreateClient();
+        var source = db.Queryable<AccountEntity>();
         if (!string.IsNullOrWhiteSpace(query.PluginKey))
             source = source.Where(x => x.PluginKey == query.PluginKey);
         if (!string.IsNullOrWhiteSpace(query.Platform))
@@ -84,7 +88,8 @@ public sealed class AccountService(
         cancellationToken.ThrowIfCancellationRequested();
 
         var entity = account.ToEntity();
-        var existing = database.Scope.Queryable<AccountEntity>().First(x => x.Id == entity.Id);
+        using var db = database.CreateClient();
+        var existing = db.Queryable<AccountEntity>().First(x => x.Id == entity.Id);
         if (existing is not null
             && !string.Equals(existing.PluginKey, entity.PluginKey, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException($"account '{entity.Id}' belongs to another plugin");
@@ -93,13 +98,13 @@ public sealed class AccountService(
         if (existing is not null)
         {
             var expected = existing.CredentialVersion;
-            var updated = database.Scope.Updateable(entity)
+            var updated = db.Updateable(entity)
                 .Where(row => row.Id == entity.Id && row.PluginKey == entity.PluginKey && row.CredentialVersion == expected)
                 .ExecuteCommand();
             if (updated == 0) throw new InvalidOperationException("Account credentials changed concurrently; read the account again.");
         }
         else
-            database.Scope.Insertable(entity).ExecuteCommand();
+            db.Insertable(entity).ExecuteCommand();
         account.CredentialVersion = entity.CredentialVersion;
 
         // Re-enabling/re-authorizing an account must also reconcile its fast cooldown marker.
@@ -152,7 +157,8 @@ public sealed class AccountService(
         var updatesCredential = fields.Contains("credential", StringComparer.Ordinal);
         var expected = account.CredentialVersion;
         if (updatesCredential) entity.CredentialVersion = checked(expected + 1);
-        var query = database.Scope.Updateable(entity).UpdateColumns(columns)
+        using var db = database.CreateClient();
+        var query = db.Updateable(entity).UpdateColumns(columns)
             .Where(row => row.Id == account.Id && row.PluginKey == account.PluginKey && row.Platform == account.Platform);
         if (updatesCredential) query = query.Where(row => row.CredentialVersion == expected);
         if (query.ExecuteCommand() == 0) throw new InvalidOperationException("Account was removed or its credential version changed.");
@@ -167,7 +173,8 @@ public sealed class AccountService(
     public async Task DeleteAsync(string pluginKey, string id, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        database.Scope.Deleteable<AccountEntity>()
+        using var db = database.CreateClient();
+        db.Deleteable<AccountEntity>()
             .Where(x => x.Id == id && x.PluginKey == pluginKey)
             .ExecuteCommand();
         await shortTermState.RemoveAsync(AccountCooldownKey(pluginKey, id), cancellationToken);
@@ -198,7 +205,8 @@ public sealed class AccountService(
 
         var untilUtc = until.UtcDateTime;
         var updatedAtUtc = DateTime.UtcNow;
-        var updated = database.Scope.Updateable<AccountEntity>()
+        using var db = database.CreateClient();
+        var updated = db.Updateable<AccountEntity>()
             .SetColumns(account => new AccountEntity
             {
                 CooldownUntilUtc = SqlFunc.IIF(
@@ -235,7 +243,8 @@ public sealed class AccountService(
         if (shortTermState.IsConfigured)
             await shortTermState.RemoveAsync(AccountCooldownKey(pluginKey, id), cancellationToken);
 
-        var updated = database.Scope.Updateable<AccountEntity>()
+        using var db = database.CreateClient();
+        var updated = db.Updateable<AccountEntity>()
             .SetColumns(account => new AccountEntity
             {
                 CooldownUntilUtc = null,
@@ -261,7 +270,8 @@ public sealed class AccountService(
         CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var updated = database.Scope.Updateable<AccountEntity>()
+        using var db = database.CreateClient();
+        var updated = db.Updateable<AccountEntity>()
             .SetColumns(row => new AccountEntity
             {
                 State = ResourceState.Disabled.ToString(), DisabledUntilUtc = null, Reason = reason,
@@ -280,7 +290,8 @@ public sealed class AccountService(
         ArgumentOutOfRangeException.ThrowIfNegative(expectedVersion);
         cancellationToken.ThrowIfCancellationRequested();
         var (kind, json) = CredentialCodec.Encode(credential);
-        var current = database.Scope.Queryable<AccountEntity>().First(row => row.Id == id && row.PluginKey == pluginKey);
+        using var db = database.CreateClient();
+        var current = db.Queryable<AccountEntity>().First(row => row.Id == id && row.PluginKey == pluginKey);
         if (current is null || current.CredentialVersion != expectedVersion) return null;
         var expiresAt = credential switch
         {
@@ -289,7 +300,7 @@ public sealed class AccountService(
             _ => current.ExpiresAtUtc
         };
         var label = credential is OAuthCredential { Nickname: { } nickname } ? nickname : current.Label;
-        var changed = database.Scope.Updateable<AccountEntity>().SetColumns(row => new AccountEntity
+        var changed = db.Updateable<AccountEntity>().SetColumns(row => new AccountEntity
         {
             CredentialKind = kind, CredentialJson = json, CredentialVersion = row.CredentialVersion + 1,
             ExpiresAtUtc = expiresAt, Label = label, UpdatedAtUtc = DateTime.UtcNow

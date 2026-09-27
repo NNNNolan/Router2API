@@ -29,12 +29,12 @@ public sealed class DatabaseInitializerTests
             initializer.Initialize();
 
             File.Exists(path).Should().BeTrue();
-            database.Scope.Queryable<AccountEntity>().Count().Should().Be(0);
-            database.Scope.Queryable<ResourceEventEntity>().Count().Should().Be(0);
+            using var db = database.CreateClient();
+            db.Queryable<AccountEntity>().Count().Should().Be(0);
+            db.Queryable<ResourceEventEntity>().Count().Should().Be(0);
         }
         finally
         {
-            database.Scope.Dispose();
             GC.Collect();
             GC.WaitForPendingFinalizers();
             try
@@ -104,7 +104,6 @@ public sealed class DatabaseInitializerTests
         }
         finally
         {
-            database.Scope.Dispose();
             GC.Collect();
             GC.WaitForPendingFinalizers();
             try

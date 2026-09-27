@@ -559,7 +559,6 @@ public sealed class JsCapabilityParityTests
             foreach (var terminal in _terminals) await terminal.DisposeAsync();
             _handler.Dispose();
             _transport.Dispose();
-            _database.Scope.Dispose();
             try { File.Delete(_databasePath); } catch (IOException) { }
         }
 

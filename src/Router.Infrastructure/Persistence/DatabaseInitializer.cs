@@ -10,8 +10,9 @@ public sealed class DatabaseInitializer(SqlSugarDatabase database, ILogger<Datab
         ArgumentNullException.ThrowIfNull(database);
         ArgumentNullException.ThrowIfNull(logger);
 
-        database.Scope.DbMaintenance.CreateDatabase();
-        database.Scope.CodeFirst.InitTables(
+        using var db = database.CreateClient();
+        db.DbMaintenance.CreateDatabase();
+        db.CodeFirst.InitTables(
             typeof(AccountEntity),
             typeof(ProxySubscriptionEntity),
             typeof(ProxyEndpointEntity),
@@ -46,32 +47,34 @@ public sealed class DatabaseInitializer(SqlSugarDatabase database, ILogger<Datab
 
         RemoveLegacySchema();
 
-        database.Scope.Ado.ExecuteCommand(
+        db.Ado.ExecuteCommand(
             "UPDATE proxy_subscriptions SET RefreshIntervalMinutes = 60 WHERE RefreshIntervalMinutes IS NULL OR RefreshIntervalMinutes <= 0");
-        database.Scope.Ado.ExecuteCommand(
+        db.Ado.ExecuteCommand(
             "UPDATE accounts SET PluginKey = Platform WHERE PluginKey IS NULL OR PluginKey = ''");
         logger.LogInformation("sqlite database initialized with host resource schema");
     }
 
     private void EnsureColumn(string tableName, string columnName, string definition)
     {
-        var columns = database.Scope.Ado.SqlQuery<SqliteColumnInfo>($"PRAGMA table_info('{tableName}')");
+        using var db = database.CreateClient();
+        var columns = db.Ado.SqlQuery<SqliteColumnInfo>($"PRAGMA table_info('{tableName}')");
         if (columns.Any(column => string.Equals(column.Name, columnName, StringComparison.OrdinalIgnoreCase)))
             return;
 
-        database.Scope.Ado.ExecuteCommand($"ALTER TABLE {tableName} ADD COLUMN {columnName} {definition}");
+        db.Ado.ExecuteCommand($"ALTER TABLE {tableName} ADD COLUMN {columnName} {definition}");
     }
 
     private void RemoveLegacySchema()
     {
-        var subscriptionColumns = database.Scope.Ado.SqlQuery<SqliteColumnInfo>(
+        using var db = database.CreateClient();
+        var subscriptionColumns = db.Ado.SqlQuery<SqliteColumnInfo>(
             "PRAGMA table_info('proxy_subscriptions')");
         if (subscriptionColumns.Any(column =>
                 string.Equals(column.Name, "TargetPluginKeysJson", StringComparison.OrdinalIgnoreCase)))
         {
             try
             {
-                database.Scope.Ado.ExecuteCommand(
+                db.Ado.ExecuteCommand(
                     "ALTER TABLE proxy_subscriptions DROP COLUMN TargetPluginKeysJson");
             }
             catch (Exception exception)
@@ -80,7 +83,7 @@ public sealed class DatabaseInitializer(SqlSugarDatabase database, ILogger<Datab
             }
         }
 
-        database.Scope.Ado.ExecuteCommand("DROP TABLE IF EXISTS resource_cooldowns");
+        db.Ado.ExecuteCommand("DROP TABLE IF EXISTS resource_cooldowns");
     }
 
     private sealed class SqliteColumnInfo

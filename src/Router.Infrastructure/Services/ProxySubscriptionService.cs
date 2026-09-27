@@ -21,7 +21,8 @@ public sealed class ProxySubscriptionService(
     public Task<IReadOnlyList<ProxySubscription>> ListAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var query = database.Scope.Queryable<ProxySubscriptionEntity>();
+        using var db = database.CreateClient();
+        var query = db.Queryable<ProxySubscriptionEntity>();
         var values = (database.FactCacheEnabled
                 ? query.WithCache(60).ToList()
                 : query.ToList())
@@ -36,12 +37,13 @@ public sealed class ProxySubscriptionService(
     {
         ArgumentNullException.ThrowIfNull(subscription);
         cancellationToken.ThrowIfCancellationRequested();
+        using var db = database.CreateClient();
         var entity = subscription.ToEntity();
-        var exists = database.Scope.Queryable<ProxySubscriptionEntity>().Any(x => x.Id == entity.Id);
+        var exists = db.Queryable<ProxySubscriptionEntity>().Any(x => x.Id == entity.Id);
         if (exists)
-            database.Scope.Updateable(entity).ExecuteCommand();
+            db.Updateable(entity).ExecuteCommand();
         else
-            database.Scope.Insertable(entity).ExecuteCommand();
+            db.Insertable(entity).ExecuteCommand();
 
         return Task.FromResult(subscription);
     }
@@ -53,12 +55,14 @@ public sealed class ProxySubscriptionService(
         foreach (var proxy in proxies.Where(proxy => proxy.SubscriptionId == id).ToArray())
             await proxyStore.RemoveAsync(proxy.Id, cancellationToken);
 
-        database.Scope.Deleteable<ProxySubscriptionEntity>().Where(x => x.Id == id).ExecuteCommand();
+        using var db = database.CreateClient();
+        db.Deleteable<ProxySubscriptionEntity>().Where(x => x.Id == id).ExecuteCommand();
     }
 
     public async Task<RefreshResult> RefreshAsync(string id, CancellationToken cancellationToken = default)
     {
-        var entity = database.Scope.Queryable<ProxySubscriptionEntity>().First(x => x.Id == id)
+        using var db = database.CreateClient();
+        var entity = db.Queryable<ProxySubscriptionEntity>().First(x => x.Id == id)
             ?? throw new KeyNotFoundException($"proxy subscription '{id}' was not found");
         var subscription = entity.ToDomain();
 

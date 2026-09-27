@@ -10,14 +10,16 @@ public sealed class ProxyStore(SqlSugarDatabase database) : IProxyStore
     public Task<ProxyEndpoint?> GetAsync(string id, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var entity = database.Scope.Queryable<ProxyEndpointEntity>().First(x => x.Id == id);
+        using var db = database.CreateClient();
+        var entity = db.Queryable<ProxyEndpointEntity>().First(x => x.Id == id);
         return Task.FromResult(entity?.ToDomain());
     }
 
     public Task<IReadOnlyList<ProxyEndpoint>> ListAsync(CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var result = database.Scope.Queryable<ProxyEndpointEntity>()
+        using var db = database.CreateClient();
+        var result = db.Queryable<ProxyEndpointEntity>()
             .OrderBy(x => x.Id)
             .ToList()
             .Select(x => x.ToDomain())
@@ -32,7 +34,8 @@ public sealed class ProxyStore(SqlSugarDatabase database) : IProxyStore
         cancellationToken.ThrowIfCancellationRequested();
         var page = Math.Max(1, query.Page);
         var pageSize = query.PageSize is 20 or 50 or 100 ? query.PageSize : 20;
-        var source = database.Scope.Queryable<ProxyEndpointEntity>();
+        using var db = database.CreateClient();
+        var source = db.Queryable<ProxyEndpointEntity>();
         if (query.SubscriptionIds is { Count: > 0 })
             source = source.Where(x => query.SubscriptionIds.Contains(x.SubscriptionId));
         if (query.State is { } state)
@@ -52,18 +55,20 @@ public sealed class ProxyStore(SqlSugarDatabase database) : IProxyStore
     {
         ArgumentNullException.ThrowIfNull(proxy);
         cancellationToken.ThrowIfCancellationRequested();
+        using var db = database.CreateClient();
         var entity = proxy.ToEntity();
-        if (database.Scope.Queryable<ProxyEndpointEntity>().Any(x => x.Id == entity.Id))
-            database.Scope.Updateable(entity).ExecuteCommand();
+        if (db.Queryable<ProxyEndpointEntity>().Any(x => x.Id == entity.Id))
+            db.Updateable(entity).ExecuteCommand();
         else
-            database.Scope.Insertable(entity).ExecuteCommand();
+            db.Insertable(entity).ExecuteCommand();
         return Task.CompletedTask;
     }
 
     public Task RemoveAsync(string id, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        database.Scope.Deleteable<ProxyEndpointEntity>().Where(x => x.Id == id).ExecuteCommand();
+        using var db = database.CreateClient();
+        db.Deleteable<ProxyEndpointEntity>().Where(x => x.Id == id).ExecuteCommand();
         return Task.CompletedTask;
     }
 }

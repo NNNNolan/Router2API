@@ -15,7 +15,8 @@ public sealed class UsageBucketStore(SqlSugarDatabase database) : IUsageBucketSt
         var day = log.CreatedAt.UtcDateTime.Date;
         var platform = string.IsNullOrWhiteSpace(log.Platform) ? "unknown" : log.Platform;
         var id = $"{day:yyyyMMdd}:{platform}";
-        database.Scope.Ado.ExecuteCommand(
+        using var db = database.CreateClient();
+        db.Ado.ExecuteCommand(
             """
             INSERT INTO usage_buckets
                 (Id, Day, Platform, Requests, PromptTokens, CompletionTokens)

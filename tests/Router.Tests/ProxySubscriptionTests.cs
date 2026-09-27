@@ -14,6 +14,52 @@ namespace Router.Tests;
 public sealed class ProxySubscriptionTests
 {
     [TestMethod]
+    public async Task ListingSubscriptionsDoesNotCloseAnActiveReaderInTheParentContext()
+    {
+        var path = Path.Combine(AppContext.BaseDirectory, "test-data", $"router2api-{Guid.NewGuid():N}.db");
+        var database = new SqlSugarDatabase(
+            Options.Create(new DatabaseOptions { Path = path }),
+            NullLogger<SqlSugarDatabase>.Instance);
+        try
+        {
+            new DatabaseInitializer(database, NullLogger<DatabaseInitializer>.Instance).Initialize();
+            using var service = new ProxySubscriptionService(
+                database, new ProxyStore(database), new StaticHttpClientFactory(string.Empty), Mock.Of<IProxyProbeService>());
+            await service.SaveAsync(new ProxySubscription
+            {
+                Id = "subscription-reader",
+                Name = "reader isolation",
+                Url = "https://feed.test/proxies"
+            });
+
+            using var db = database.CreateClient();
+            using var command = db.Ado.Connection.CreateCommand();
+            command.Connection!.Open();
+            command.CommandText = "SELECT 1 UNION ALL SELECT 2";
+            using var reader = command.ExecuteReader();
+            reader.FieldCount.Should().Be(1);
+
+            // 子任务继承父级 ExecutionContext，查询结束时不能关闭父级仍在读取的连接。
+            await Task.Run(async () =>
+            {
+                await Task.Yield();
+                (await service.ListAsync()).Should().ContainSingle(item => item.Id == "subscription-reader");
+            });
+
+            reader.FieldCount.Should().Be(1);
+            reader.Read().Should().BeTrue();
+            reader.GetInt64(0).Should().Be(1);
+            reader.Read().Should().BeTrue();
+            reader.GetInt64(0).Should().Be(2);
+            reader.Read().Should().BeFalse();
+        }
+        finally
+        {
+            try { File.Delete(path); } catch (IOException) { /* SQLite 连接池可能延后释放。 */ }
+        }
+    }
+
+    [TestMethod]
     public async Task RefreshParsesAuthenticatedProxyUrisAndDeleteRemovesNodes()
     {
         var directory = Path.Combine(AppContext.BaseDirectory, "test-data");
@@ -85,7 +131,6 @@ public sealed class ProxySubscriptionTests
         }
         finally
         {
-            database.Scope.Dispose();
             GC.Collect();
             GC.WaitForPendingFinalizers();
             try

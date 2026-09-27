@@ -5,9 +5,13 @@ using Router.Infrastructure.Services;
 
 namespace Router.Infrastructure.Persistence;
 
-/// <summary>持有进程级 SqlSugar 作用域。</summary>
+/// <summary>复用 SqlSugar 配置，为每次数据库操作创建独立客户端。</summary>
 public sealed class SqlSugarDatabase
 {
+    private readonly string _connectionString;
+    private readonly ILogger<SqlSugarDatabase> _logger;
+    private readonly SqlSugarRedisCache? _cache;
+
     public SqlSugarDatabase(
         IOptions<DatabaseOptions> options,
         ILogger<SqlSugarDatabase> logger,
@@ -19,11 +23,19 @@ public sealed class SqlSugarDatabase
         var path = options.Value.Path;
         var fullPath = Path.GetFullPath(path);
         Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
-        FactCacheEnabled = redis is { IsConfigured: true };
+        _connectionString = $"DataSource={fullPath}";
+        _logger = logger;
+        if (redis is { IsConfigured: true })
+            _cache = new SqlSugarRedisCache(redis, logger);
+    }
 
+    /// <summary>创建独立客户端，避免并发任务共享 AsyncLocal 中的连接并提前关闭 reader。</summary>
+    /// <returns>由调用方通过 using 释放的客户端。</returns>
+    public SqlSugarClient CreateClient()
+    {
         var config = new ConnectionConfig
         {
-            ConnectionString = $"DataSource={fullPath}",
+            ConnectionString = _connectionString,
             DbType = DbType.Sqlite,
             IsAutoCloseConnection = true,
             InitKeyType = InitKeyType.Attribute,
@@ -32,21 +44,20 @@ public sealed class SqlSugarDatabase
                 IsAutoRemoveDataCache = true
             }
         };
-        if (redis is { IsConfigured: true })
+        if (_cache is not null)
         {
             config.ConfigureExternalServices = new ConfigureExternalServices
             {
-                DataInfoCacheService = new SqlSugarRedisCache(redis, logger)
+                DataInfoCacheService = _cache
             };
         }
 
-        Scope = new SqlSugarScope(config, db =>
+        return new SqlSugarClient(config, db =>
         {
             db.Aop.OnLogExecuting = (sql, parameters) =>
-                logger.LogDebug("sql={Sql} parameters={Parameters}", sql, parameters);
+                _logger.LogDebug("sql={Sql} parameters={Parameters}", sql, parameters);
         });
     }
 
-    public SqlSugarScope Scope { get; }
-    public bool FactCacheEnabled { get; }
+    public bool FactCacheEnabled => _cache is not null;
 }

@@ -16,7 +16,8 @@ public sealed class AnalyticsService(SqlSugarDatabase database) : IAnalyticsServ
         if (query.ToUtc <= query.FromUtc)
             throw new ArgumentException("analytics range must be positive", nameof(query));
 
-        var source = database.Scope.Queryable<RequestLogEntity>()
+        using var db = database.CreateClient();
+        var source = db.Queryable<RequestLogEntity>()
             .Where(item => item.CreatedAtUtc >= query.FromUtc.UtcDateTime
                 && item.CreatedAtUtc < query.ToUtc.UtcDateTime);
         if (!string.IsNullOrWhiteSpace(query.Platform)) source = source.Where(item => item.Platform == query.Platform);

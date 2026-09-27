@@ -8,7 +8,8 @@ public sealed class PluginHttpOriginStore(SqlSugarDatabase database)
     public Task<IReadOnlyList<string>> ListAsync(string pluginKey, CancellationToken token = default)
     {
         token.ThrowIfCancellationRequested();
-        return Task.FromResult<IReadOnlyList<string>>(database.Scope.Queryable<PluginHttpOriginEntity>()
+        using var db = database.CreateClient();
+        return Task.FromResult<IReadOnlyList<string>>(db.Queryable<PluginHttpOriginEntity>()
             .Where(row => row.PluginKey == pluginKey).ToList().Select(row => row.Origin).ToArray());
     }
 
@@ -18,7 +19,8 @@ public sealed class PluginHttpOriginStore(SqlSugarDatabase database)
         token.ThrowIfCancellationRequested();
         // A stable compound primary key makes concurrent approvals idempotent.
         var id = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(pluginKey + "\0" + origin)));
-        database.Scope.Ado.ExecuteCommand(
+        using var db = database.CreateClient();
+        db.Ado.ExecuteCommand(
             "INSERT OR IGNORE INTO plugin_http_origins (Id, PluginKey, Origin) VALUES (@Id, @PluginKey, @Origin)",
             new { Id = id, PluginKey = pluginKey, Origin = origin });
         return Task.CompletedTask;
@@ -28,7 +30,8 @@ public sealed class PluginHttpOriginStore(SqlSugarDatabase database)
     {
         origin = Normalize(origin);
         token.ThrowIfCancellationRequested();
-        database.Scope.Deleteable<PluginHttpOriginEntity>().Where(row => row.PluginKey == pluginKey && row.Origin == origin).ExecuteCommand();
+        using var db = database.CreateClient();
+        db.Deleteable<PluginHttpOriginEntity>().Where(row => row.PluginKey == pluginKey && row.Origin == origin).ExecuteCommand();
         return Task.CompletedTask;
     }
 

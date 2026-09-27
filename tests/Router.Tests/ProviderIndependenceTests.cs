@@ -63,13 +63,13 @@ public sealed class ProviderIndependenceTests
                 PluginKey = pluginKey, EventType = "upstream.forbidden", StatusCode = 403,
                 Message = "test", DetailsJson = "Bearer unit-secret " + new string('x', 20000)
             });
-            var saved = database.Scope.Queryable<PluginLogEntity>().Single();
+            using var db = database.CreateClient();
+            var saved = db.Queryable<PluginLogEntity>().Single();
             saved.DetailsJson.Should().NotContain("unit-secret");
             saved.DetailsJson!.Length.Should().BeLessThanOrEqualTo(16384);
         }
         finally
         {
-            database.Scope.Dispose();
             try { File.Delete(path); } catch (IOException) { /* SQLite 连接池可能延后释放。 */ }
         }
     }
