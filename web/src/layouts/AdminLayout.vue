@@ -48,7 +48,7 @@ const navItems = computed(() => [
   {
     ...coreNavItems[5],
     children: (pluginQuery.data.value ?? [])
-      .filter(plugin => plugin.hasMainPage)
+      .filter(plugin => plugin.state === 'Active' && plugin.hasMainPage)
       .map(plugin => ({ to: `/plugins/${plugin.pluginKey}`, label: plugin.mainPageTitle || plugin.name, icon: ExtensionPuzzleOutline })),
   },
   ...coreNavItems.slice(6),

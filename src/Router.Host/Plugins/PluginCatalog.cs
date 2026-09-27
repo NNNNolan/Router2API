@@ -693,7 +693,7 @@ public sealed class PluginCatalog(
         public IReadOnlyList<PlatformRegistration> Platforms { get; } = platforms;
         public IReadOnlyList<TrackedTerminal> Terminals { get; } = terminals;
         public IReadOnlyList<PluginEndpointDefinition> Endpoints { get; } = endpoints;
-        public PluginMainPage? MainPage { get; } = mainPage;
+        public PluginMainPage? MainPage => Descriptor.State == "Active" ? mainPage : null;
         public LoadedPlugin? Package { get; } = package;
 
         public bool TryEnterEndpoint()
@@ -742,7 +742,14 @@ public sealed class PluginCatalog(
         public PluginDescriptor ToDescriptor()
         {
             lock (_endpointGate)
-                return Descriptor with { InFlight = Terminals.Sum(terminal => terminal.InFlight) + _endpointInFlight + (Package?.JobInFlight ?? 0) };
+                return Descriptor with
+                {
+                    InFlight = Terminals.Sum(terminal => terminal.InFlight) + _endpointInFlight + (Package?.JobInFlight ?? 0),
+                    // 停用标记可能保留旧页面元数据，菜单应以当前可用页面为准。
+                    HasMainPage = MainPage is not null,
+                    MainPageTitle = MainPage?.Title,
+                    MainPageVersion = MainPage?.Version
+                };
         }
     }
 

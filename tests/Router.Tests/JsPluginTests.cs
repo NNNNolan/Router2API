@@ -294,6 +294,56 @@ public sealed class JsPluginTests
     }
 
     [TestMethod]
+    [DataRow(true)]
+    [DataRow(false)]
+    public async Task CatalogHidesDisabledPluginPageAndRestoresItOnEnable(bool hasPage)
+    {
+        await using var package = await TestPackage.CreateAsync(hasPage);
+        var host = Host(new Mock<IProxyPoolHttpClientFactory>());
+        var hostFactory = new Mock<IPluginHostFactory>();
+        hostFactory.Setup(factory => factory.Create("js-test")).Returns(host);
+        hostFactory.Setup(factory => factory.Create("js-test", It.IsAny<IReadOnlyList<string>>())).Returns(host);
+
+        PluginCatalog CreateCatalog()
+        {
+            var result = new PluginCatalog(new PlatformRegistry(), Mock.Of<IModelCatalog>(), hostFactory.Object,
+                new PluginPolicyRegistry(), null!, null!, Mock.Of<IPluginLogSink>(), Microsoft.Extensions.Logging.Abstractions.NullLogger<PluginCatalog>.Instance,
+                Microsoft.Extensions.Options.Options.Create(new PluginExecutionOptions()));
+            // 所有包、停用标记和 staging 都位于本用例拥有的临时目录，不触碰真实插件。
+            typeof(PluginCatalog).GetField("_pluginRoot", BindingFlags.Instance | BindingFlags.NonPublic)!
+                .SetValue(result, Path.GetDirectoryName(package.Root)!);
+            return result;
+        }
+
+        await using var catalog = CreateCatalog();
+        await catalog.ReloadAsync("js-test");
+        catalog.Get("js-test")!.HasMainPage.Should().Be(hasPage);
+
+        var disabled = await catalog.SetEnabledAsync("js-test", false);
+
+        disabled!.State.Should().Be("Disabled");
+        disabled.HasMainPage.Should().BeFalse();
+        disabled.MainPageTitle.Should().BeNull();
+        disabled.MainPageVersion.Should().BeNull();
+        catalog.All.Single().HasMainPage.Should().BeFalse();
+        catalog.GetMainPage("js-test").Should().BeNull();
+
+        // 模拟宿主重启：旧停用标记可能仍存有主页面元数据，也不能恢复失效菜单。
+        await using var restarted = CreateCatalog();
+        await restarted.ReloadAsync("js-test");
+        restarted.Get("js-test")!.State.Should().Be("Disabled");
+        restarted.All.Single().HasMainPage.Should().BeFalse();
+        restarted.GetMainPage("js-test").Should().BeNull();
+
+        var enabled = await restarted.SetEnabledAsync("js-test", true);
+        enabled!.State.Should().Be("Active");
+        enabled.HasMainPage.Should().Be(hasPage);
+        restarted.All.Single().HasMainPage.Should().Be(hasPage);
+        (restarted.GetMainPage("js-test") is not null).Should().Be(hasPage);
+        if (hasPage) enabled.MainPageTitle.Should().Be("JS test");
+    }
+
+    [TestMethod]
     public async Task ShippedExamplePassesRealJintValidationWithoutNetwork()
     {
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
@@ -345,12 +395,12 @@ public sealed class JsPluginTests
     {
         private readonly string _ownedRoot = Path.Combine(Path.GetTempPath(), "Router2API-JsTests", Guid.NewGuid().ToString("N"));
         public string Root => Path.Combine(_ownedRoot, "js-test");
-        public static async Task<TestPackage> CreateAsync()
+        public static async Task<TestPackage> CreateAsync(bool hasPage = true)
         {
             var package = new TestPackage();
             Directory.CreateDirectory(Path.Combine(package.Root, "server"));
             Directory.CreateDirectory(Path.Combine(package.Root, "ui"));
-            var manifest = Manifest() with { Page = new JsPageManifest { Title = "JS test", Entry = "ui/index.html" } };
+            var manifest = Manifest() with { Page = hasPage ? new JsPageManifest { Title = "JS test", Entry = "ui/index.html" } : null };
             await File.WriteAllTextAsync(Path.Combine(package.Root, "plugin.json"), JsonSerializer.Serialize(manifest, JsPluginCodec.JsonOptions));
             await File.WriteAllTextAsync(Path.Combine(package.Root, "server/plugin.mjs"), $"export async function invoke(ctx) {{ {Completion} }}");
             await File.WriteAllTextAsync(Path.Combine(package.Root, "ui/index.html"), "<p>JS test page</p>");
