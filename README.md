@@ -77,11 +77,31 @@ plugins/
 
 ## 发布与 Docker
 
-推送形如 `v2.0.1` 的 tag 时，[宿主 Release 工作流](.github/workflows/release-host.yml)会创建同名 GitHub Release，标题为 `Router2API v2.0.1`，正文由 GitHub 自动生成；目前仅发布 Release 页面，不上传宿主二进制包。独立的 Contracts 工作流会将 `src/Router.Contracts` 打成包含 DLL 的 NuGet 包并发布到 nuget.org。NuGet 发布使用 [NuGet Trusted Publishing](https://learn.microsoft.com/en-us/nuget/nuget-org/trusted-publishing)：工作流通过 GitHub OIDC 获取临时发布凭据，无需保存长期 API key。
+推送形如 `v2.0.1` 的 tag 时，[宿主 Release 工作流](.github/workflows/release-host.yml)会构建并推送 **Linux amd64 和 arm64** 多平台镜像到 Docker Hub 的 `<Docker Hub 用户名>/router2api`，成功后创建同名 GitHub Release。标题为 `Router2API v2.0.1`，通过 `generate_release_notes: true` 自动生成发布说明。
+
+首次发布前，在 GitHub 仓库 **Settings → Secrets and variables → Actions** 配置：
+
+| 类型 | 名称 | 内容 |
+| --- | --- | --- |
+| Variables（也支持 Secrets） | `DOCKERHUB_USERNAME` | Docker Hub 用户名 |
+| Secrets | `DOCKERHUB_TOKEN` | 对目标 Docker Hub 仓库具有读写权限的 Access Token |
+
+正式 tag `v2.0.1` 会发布镜像标签 `2.0.1` 和 `latest`；预发布 tag（如 `v2.1.0-rc.1`）只发布对应版本镜像，并创建 GitHub 预发布版本。tag 必须是 `v` 开头的合法 SemVer 版本。
+
+[Dockerfile](Dockerfile) 参考官方 [aspnetapp Alpine 多平台构建示例](https://github.com/dotnet/dotnet-docker/blob/nightly-UpdateDependencies-nightly-From-dotnet-dotnet-11.0/samples/aspnetapp/Dockerfile.alpine)，使用 `sdk:10.0-alpine` 和 `aspnet:10.0-alpine`。前端和 .NET SDK 在构建机架构上运行，`restore`、`publish` 都通过 `TARGETARCH` 选择目标架构（`linux-musl-x64` / `linux-musl-arm64`）。ICU 和时区数据从目标架构的官方 `runtime-deps:10.0-alpine-extra` 镜像复制，所有 `RUN` 都位于构建机架构的阶段，无需 QEMU。
+
+也可以用 Docker Buildx 手动构建并推送（先执行 `docker login`，将示例用户名替换为自己的用户名）：
+
+```powershell
+docker buildx create --name router2api-builder --driver docker-container --use
+docker buildx build --platform linux/amd64,linux/arm64 -t your-dockerhub-user/router2api:2.0.1 --push .
+```
+
+独立的 Contracts 工作流会将 `src/Router.Contracts` 打成包含 DLL 的 NuGet 包并发布到 nuget.org。NuGet 发布使用 [NuGet Trusted Publishing](https://learn.microsoft.com/en-us/nuget/nuget-org/trusted-publishing)：工作流通过 GitHub OIDC 获取临时发布凭据，无需保存长期 API key。
 
 首次发布前，在 nuget.org 登录目标包所有者账号，确认 `Router.Contracts` 包 ID 可用，并在 **Trusted Publishing** 中新增 GitHub 策略：Policy Name 可填 `Router2API-Contracts`（仅用于识别策略），Repository Owner 填 `NNNNolan`，Repository 填 `Router2API`，Workflow File 只填 `publish-contracts.yml`，Environment 留空；Scopes 允许发布新包和新版本，**Glob Patterns and Packages** 单独一行填 `Router.Contracts`（包 ID，不带版本号或通配符）。在 GitHub 仓库 **Settings → Secrets and variables → Actions → Variables** 新增仓库变量 `NUGET_USER`，值为该 nuget.org 账号的用户名（不是邮箱）；若已把它放在同页面的 **Secrets** 中，工作流也可读取。不要只设置在未被此任务使用的 GitHub Environment 下。策略的所有者与 `NUGET_USER` 对应；此值不是发布密钥。
 
-包版本取 tag 去掉开头 `v` 后的部分；tag 应使用合法的 NuGet 版本号。已有的 `v2.0.0` tag 不会因工作流修改自动重跑。请在 Actions 中从 `main` 点击 **Run workflow** 发起新运行，`version` 填 `2.0.0`，`nuget_user` 填 nuget.org 用户名；工作流会检出对应的 `v2.0.0` tag 并发布同版本到 nuget.org。不要在旧运行中点 **Re-run jobs**，因为重试仍使用旧运行关联的工作流提交。nuget.org 同一包 ID 和版本只能发布一次。发布只打包 Contracts，不发布宿主或插件。
+包版本取 tag 去掉开头 `v` 后的部分；tag 应使用合法的 NuGet 版本号。已有的 `v2.0.0` tag 不会因工作流修改自动重跑。请在 Actions 中从 `main` 点击 **Run workflow** 发起新运行，`version` 填 `2.0.0`，`nuget_user` 填 nuget.org 用户名；工作流会检出对应的 `v2.0.0` tag 并发布同版本到 nuget.org。不要在旧运行中点 **Re-run jobs**，因为重试仍使用旧运行关联的工作流提交。nuget.org 同一包 ID 和版本只能发布一次。此 NuGet 工作流只打包 Contracts，不发布宿主或插件。
 
 ```bash
 pnpm --dir web build
