@@ -15,6 +15,7 @@
 ## 阅读入口
 
 - [Docker 安装](#docker-安装)
+- [Docker 更新](#更新镜像)
 - [SDK 与插件边界](sdk/README.md)
 - [宿主完整运行流程](sdk/HOST-LIFECYCLE.md)
 - [AI 开发工作单](sdk/AI-DEVELOPMENT.md)
@@ -163,20 +164,61 @@ docker logs -f router2api
 
 ### 更新镜像
 
-使用 Compose 安装时，在原目录执行：
+更新需要**拉取新镜像并重建宿主容器**，仅执行 `docker restart` / `docker compose restart` 不会切换到新镜像。更新会短暂中断服务，建议在没有进行中的模型请求时操作。以下命令使用 Bash。
+
+更新前注意：
+
+- 备份原部署的配置、账号数据库和插件目录；Compose 用户还应保留原 `docker-compose.yml`、`.env` 和项目名。复制 SQLite 数据文件前先停止宿主，避免备份到不一致的数据。
+- 继续使用原来的 `volumes/data`、`volumes/plugins`、`volumes/Config` 和 Redis 数据卷。**不要删除 `volumes/`，不要执行 `docker compose down -v` 或清理 Redis 数据卷。**
+- 不要用示例文件覆盖现有 `.env` 或 `volumes/Config/Config.json`。已保存的 Config 配置优先于环境变量，更新镜像不是重置密码或 API Key。
+
+#### Docker Compose 更新
+
+在原 `docker-compose.yml` 和 `.env` 所在目录执行；如果部署时指定了 `-p` 项目名或 `-f` 配置文件，更新时沿用相同参数：
 
 ```bash
-docker compose pull
-docker compose up -d
+# 只拉取宿主的新镜像
+docker compose pull router2api
+
+# 拉取成功后重建宿主，不重启 Redis
+docker compose up -d --no-deps router2api
+
+# 检查容器状态和启动日志
+docker compose ps router2api
+docker compose logs --tail=100 router2api
 ```
 
-直接使用 `docker run` 安装时，先拉取镜像并停止、删除旧宿主容器，再执行上面的宿主 `docker run` 命令，沿用原凭据和挂载目录：
+`up -d` 检测到镜像变化后会自动重建容器，无需先执行 `down`。如果拉取失败，先解决网络或镜像访问问题，不要停止当前可用的容器。
+
+#### docker run 部署：使用 Watchtower 更新
+
+对于前面通过 `docker run --name router2api` 启动的宿主，使用 Watchtower 一次性检查并更新，无需手动停止、删除容器或重新填写启动参数。请先确认 `router2api` 容器正在运行；如果部署时使用了其他容器名，将命令末尾的 `router2api` 改为实际名称。
 
 ```bash
-docker pull hhhhzy/router2api:latest
-docker stop router2api
-docker rm router2api
+docker run --rm \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  containrrr/watchtower:latest \
+  --run-once router2api
 ```
+
+- `--run-once` 只检查一次，发现同一镜像标签有更新时拉取镜像并重建宿主；没有更新则保持原容器。完成后临时 Watchtower 容器自动删除，不会常驻定时更新。
+- 指定 `router2api` 后只更新宿主，不更新 Redis 或其他容器。**不要省略末尾的容器名，以免更新范围扩大到其他运行中的容器。**
+- Watchtower 会复用原容器的环境变量、端口、网络和数据挂载；仍需保留并备份原来的配置、数据库和插件目录。
+- **安全提示：挂载 Docker socket 会授予 Watchtower 控制宿主 Docker 的高权限，只使用可信的 Watchtower 镜像。** 上述 socket 路径适用于常见的 Linux Docker Engine 部署。
+
+执行结束后检查宿主状态和启动日志：
+
+```bash
+docker ps -a --filter name=router2api
+docker logs --tail=100 router2api
+```
+
+#### 更新后检查
+
+- 打开管理后台，确认账号、插件及模型列表正常，并测试一次模型请求。
+- 新镜像已包含前端，无需另行打包；若页面仍显示旧内容，使用 `Ctrl+F5` 强制刷新。
+- 宿主镜像更新**不会自动更新已安装插件**。插件版本需在“插件管理 → 插件更新”中单独更新，并确认与宿主兼容。
+- Watchtower 只更新容器当前使用的镜像标签，不会把固定版本自动切换到其他版本。若要更换固定版本，需修改 Compose 的 `image` 后更新，或按[启动宿主命令](#直接使用-docker-run)用目标已发布版本重建容器，沿用原配置和挂载。
 
 ## 验证
 
