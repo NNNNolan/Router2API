@@ -78,8 +78,12 @@ public sealed class PluginCatalog(
                         throw new InvalidOperationException("Plugin is busy; previous package restored.");
                     disabled.Descriptor = disabled.Descriptor with
                     {
-                        Name = entry.Name, Version = entry.Version, Description = entry.Description,
-                        Runtime = entry.Runtime, State = "Disabled", DirectoryPath = target
+                        Name = entry.Name,
+                        Version = entry.Version,
+                        Description = entry.Description,
+                        Runtime = entry.Runtime,
+                        State = "Disabled",
+                        DirectoryPath = target
                     };
                     await File.WriteAllTextAsync(Path.Combine(DisabledPluginRoot, pluginKey + ".disabled"),
                         JsonSerializer.Serialize(disabled.Descriptor), cancellationToken);
@@ -130,7 +134,8 @@ public sealed class PluginCatalog(
                 if (_plugins.TryGetValue(pluginKey, out var plugin)
                     && !await DrainAndUnloadAsync(plugin, cancellationToken))
                     throw new InvalidOperationException("Plugin is busy; removal failed.");
-                File.Delete(Path.Combine(DisabledPluginRoot, pluginKey + ".disabled"));
+                if (File.Exists(Path.Combine(DisabledPluginRoot, pluginKey + ".disabled")))
+                    File.Delete(Path.Combine(DisabledPluginRoot, pluginKey + ".disabled"));
                 _plugins.TryRemove(pluginKey, out _);
             }
             catch
@@ -348,7 +353,9 @@ public sealed class PluginCatalog(
             {
                 var result = await endpoint.InvokeAsync(new PluginHttpContext
                 {
-                    PluginKey = endpoint.PluginKey, Platform = endpoint.Platform, CancellationToken = timeout.Token,
+                    PluginKey = endpoint.PluginKey,
+                    Platform = endpoint.Platform,
+                    CancellationToken = timeout.Token,
                     Query = context.Request.Query.ToDictionary(pair => pair.Key, pair => pair.Value.ToString(), StringComparer.OrdinalIgnoreCase),
                     Body = await ReadBodyAsync(context, timeout.Token)
                 });
@@ -480,7 +487,7 @@ public sealed class PluginCatalog(
             var tracked = candidate.Platforms.Select(item => new TrackedTerminal(item.Terminal, item.Tasks)).ToArray();
             var registrations = candidate.Platforms.Select((item, index) => new PlatformRegistration(
                 item.Name, item.PluginKey, item.DisplayName, tracked[index], item.ProbeEndpoint)
-                { ModelCacheTtl = item.ModelCacheTtl }).ToArray();
+            { ModelCacheTtl = item.ModelCacheTtl }).ToArray();
             var runtime = new RuntimePlugin(candidate.Describe(pluginName, stagingDirectory), registrations, tracked,
                 candidate.Endpoints, candidate.MainPage, candidate);
             await candidate.StartAsync(cancellationToken);
@@ -504,7 +511,8 @@ public sealed class PluginCatalog(
             logger.LogError(exception, "plugin activation failed name={PluginName}", pluginName);
             if (!_plugins.ContainsKey(pluginName))
                 _plugins[pluginName] = CreateDisabledRuntime(new PluginDescriptor(pluginName, pluginName, "unknown", "Failed",
-                    sourceDirectory, DateTimeOffset.UtcNow, 0) { Runtime = loader.Runtime });
+                    sourceDirectory, DateTimeOffset.UtcNow, 0)
+                { Runtime = loader.Runtime });
         }
         finally
         {
