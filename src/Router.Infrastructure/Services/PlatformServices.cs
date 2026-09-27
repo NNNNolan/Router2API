@@ -62,7 +62,7 @@ public sealed class ModelCatalog(
     ILogger<ModelCatalog>? logger = null,
     TimeProvider? timeProvider = null) : IModelCatalog
 {
-    private static readonly TimeSpan ModelQueryTimeout = TimeSpan.FromSeconds(25);
+    private static readonly TimeSpan ModelQueryTimeout = TimeSpan.FromSeconds(45);
     private readonly ConcurrentDictionary<string, CacheSlot> _cache = new(StringComparer.OrdinalIgnoreCase);
 
     public async Task<IReadOnlyList<ModelDescriptor>> ListAsync(CancellationToken cancellationToken = default)
@@ -113,7 +113,7 @@ public sealed class ModelCatalog(
             using var client = transport.CreateClient(null, new PluginHttpClientOptions
             {
                 AllowAutoRedirect = true,
-                RequestTimeout = TimeSpan.FromSeconds(30)
+                RequestTimeout = TimeSpan.FromSeconds(45)
             });
             client.DefaultRequestHeaders.UserAgent.ParseAdd("Router2API/1.0 model-discovery");
             var query = registration.Terminal.GetModelsAsync(

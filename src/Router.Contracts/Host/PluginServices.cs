@@ -157,7 +157,7 @@ public sealed record PluginExecutionOptions
     /// <summary>同步非流式聚合 finalizer 的预算。</summary>
     public TimeSpan CompletionMapperBudget { get; init; } = TimeSpan.FromMilliseconds(250);
     /// <summary>管理端点的整体预算。</summary>
-    public TimeSpan EndpointTimeout { get; init; } = TimeSpan.FromSeconds(30);
+    public TimeSpan EndpointTimeout { get; init; } = TimeSpan.FromSeconds(120);
     /// <summary>热更新时旧版本的排空等待上限。</summary>
     public TimeSpan DrainTimeout { get; init; } = TimeSpan.FromSeconds(10);
 

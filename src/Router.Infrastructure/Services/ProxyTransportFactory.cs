@@ -82,7 +82,7 @@ public sealed class ProxyTransportFactory : IDisposable
             PooledConnectionLifetime = TimeSpan.FromMinutes(5),
             PooledConnectionIdleTimeout = IdleLifetime,
             AutomaticDecompression = DecompressionMethods.All,
-            ConnectTimeout = TimeSpan.FromSeconds(15),
+            ConnectTimeout = TimeSpan.FromSeconds(300),
             AllowAutoRedirect = key.AllowAutoRedirect,
             UseCookies = false,
             UseProxy = false
@@ -91,8 +91,13 @@ public sealed class ProxyTransportFactory : IDisposable
 
         var proxy = new ProxyEndpoint
         {
-            Id = key.ProxyId, ConfigurationVersion = key.Version, Scheme = key.Scheme,
-            Host = key.Host!, Port = key.Port, Username = key.Username, Password = key.Password
+            Id = key.ProxyId,
+            ConfigurationVersion = key.Version,
+            Scheme = key.Scheme,
+            Host = key.Host!,
+            Port = key.Port,
+            Username = key.Username,
+            Password = key.Password
         };
         if (proxy.Scheme == ProxyScheme.Socks5)
         {
