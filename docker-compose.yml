@@ -7,9 +7,7 @@ services:
       - router2api-redis:/data
 
   router2api:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: hhhhzy/router2api:latest
     restart: unless-stopped
     depends_on:
       - redis
