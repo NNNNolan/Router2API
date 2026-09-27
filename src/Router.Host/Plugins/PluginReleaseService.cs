@@ -23,7 +23,7 @@ public sealed class PluginReleaseService(IHttpClientFactory clients, PluginCatal
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly string _root = Path.Combine(AppContext.BaseDirectory, "plugins");
-    private string SubscriptionRoot => Path.Combine(_root, "subscription");
+    private string SubscriptionRoot => Path.Combine(_root, ".subscription");
     private string StatePath => Path.Combine(SubscriptionRoot, "subscriptions.json");
 
     public async Task<IReadOnlyList<PluginRepository>> RepositoriesAsync(CancellationToken token)
@@ -308,7 +308,7 @@ public sealed class PluginReleaseService(IHttpClientFactory clients, PluginCatal
     }
 
     private static bool SafeId(string value)
-        => !string.IsNullOrEmpty(value) && value.Length <= 64 && value != "subscription"
+        => !string.IsNullOrEmpty(value) && value.Length <= 64
             && Regex.IsMatch(value, "^[a-z0-9][a-z0-9._-]*$", RegexOptions.CultureInvariant);
     private static bool SameRepository(string leftOwner, string leftRepo, string rightOwner, string rightRepo)
         => leftOwner.Equals(rightOwner, StringComparison.OrdinalIgnoreCase)

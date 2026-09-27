@@ -61,7 +61,7 @@ dotnet run --project src/Router.Host/Router.Host.csproj --no-build --no-launch-p
 - 发布程序是发布目录下的 `plugins`；
 - 容器是 `/app/plugins`，Compose 映射到 `volumes/plugins`。
 
-宿主启动和手动重载时会检查并创建 `plugins/` 与 `plugins/subscription/`；订阅数据文件在首次添加仓库时写入。
+宿主启动和手动重载时会检查并创建 `plugins/` 与 `plugins/.subscription/`；已有的 `plugins/subscription/` 订阅目录会在启动时迁移，订阅数据文件在首次添加仓库时写入。
 
 在对应插件仓库构建完整发行包，再复制到上述目录并从管理页重载：
 
@@ -73,7 +73,7 @@ plugins/
 
 不要复制源码、node_modules、账号数据或多个插件混合的 bin 目录。初次安装复制新目录；升级先备份完整旧包，再安排维护窗口替换/重载。失败重载是否保留旧版本需检查实际状态和日志，不能只看 HTTP 200。
 
-插件管理页现可添加公开 GitHub 仓库（例如 `NNNNolan/Rouer-Plugins-js` 或 `NNNNolan/Rouer-Plugins-Csharp`），选择 Release 版本和其中的部分插件下载安装；“插件更新”页签可逐项选择要更新的已订阅插件。订阅记录保存于运行目录的 `plugins/subscription/subscriptions.json`，不进数据库。插件卡片展示简介、运行状态，并提供启用、禁用和删除操作。发行索引格式见 [插件发行索引](sdk/PLUGIN-RELEASES.md)。手工安装方式仍可用于没有发行索引的插件；C# 手工包的描述优先读取包内 `plugin.json`，再读取 DLL 的程序集描述，最后尝试入口类型的 XML 文档摘要。JS 手工包读取 `plugin.json` 的 `description`。
+插件管理页现可添加公开 GitHub 仓库（例如 `NNNNolan/Rouer-Plugins-js` 或 `NNNNolan/Rouer-Plugins-Csharp`），选择 Release 版本和其中的部分插件下载安装；“插件更新”页签可逐项选择要更新的已订阅插件。订阅记录保存于运行目录的 `plugins/.subscription/subscriptions.json`，不进数据库。插件卡片展示简介、运行状态，并提供启用、禁用和删除操作。发行索引格式见 [插件发行索引](sdk/PLUGIN-RELEASES.md)。手工安装方式仍可用于没有发行索引的插件；C# 手工包的描述优先读取包内 `plugin.json`，再读取 DLL 的程序集描述，最后尝试入口类型的 XML 文档摘要。JS 手工包读取 `plugin.json` 的 `description`。
 
 ## 发布与 Docker
 

@@ -24,7 +24,7 @@
 
 `description` 是插件简介，供宿主订阅列表展示，也会写入 GitHub Release 正文。C# 从项目文件的 `Description` 读取，JS 从 `plugin.json` 读取。Release 正文按插件分段列出简介、版本和下载文件，再附仓库变更记录。`runtime` 为 `dotnet` 或 `jint`；`asset` 是**同一个 Release** 中的资产文件名，不是任意下载 URL。ZIP 顶层是 `id/`，其中直接放 C# 主 DLL 或 JS `plugin.json`。索引不包含安装路径、仓库外 URL 或自动执行指令。
 
-宿主插件管理页支持公开 GitHub 仓库订阅。管理员添加仓库后，选择一个正式 Release 和其中的插件下载；下载选择不会自动扩展到该仓库其他插件。订阅记录保存在运行目录 `plugins/subscription/subscriptions.json`，下载暂存也位于 `plugins/subscription/`，均不进入数据库。更新页签比较已订阅插件的 `contentSha256`，只更新管理员勾选的插件；旧索引没有此字段时回退到 ZIP 的 `sha256`。删除插件会移除安装目录和该插件的订阅记录；仓库记录保留，便于之后再次选择安装。
+宿主插件管理页支持公开 GitHub 仓库订阅。管理员添加仓库后，选择一个正式 Release 和其中的插件下载；下载选择不会自动扩展到该仓库其他插件。订阅记录保存在运行目录 `plugins/.subscription/subscriptions.json`，下载暂存也位于 `plugins/.subscription/`，均不进入数据库。更新页签比较已订阅插件的 `contentSha256`，只更新管理员勾选的插件；旧索引没有此字段时回退到 ZIP 的 `sha256`。删除插件会移除安装目录和该插件的订阅记录；仓库记录保留，便于之后再次选择安装。
 
 宿主订阅按以下顺序处理：
 

@@ -33,6 +33,7 @@ public sealed class PluginCatalog(
     private readonly SemaphoreSlim _reloadLock = new(1, 1);
     private readonly string _pluginRoot = Path.Combine(AppContext.BaseDirectory, "plugins");
     private string DisabledPluginRoot => Path.Combine(_pluginRoot, ".disabled");
+    private string SubscriptionRoot => Path.Combine(_pluginRoot, ".subscription");
     private int _endpointsMapped;
     private int _stagingInitialized;
 
@@ -146,7 +147,7 @@ public sealed class PluginCatalog(
     }
 
     private static bool SafePluginKey(string value)
-        => !string.IsNullOrEmpty(value) && value.Length <= 64 && value != "subscription"
+        => !string.IsNullOrEmpty(value) && value.Length <= 64
             && value[0] is >= 'a' and <= 'z' or >= '0' and <= '9'
             && value.All(character => character is >= 'a' and <= 'z' or >= '0' and <= '9' or '-' or '_' or '.');
 
@@ -208,12 +209,11 @@ public sealed class PluginCatalog(
         {
             cancellationToken.ThrowIfCancellationRequested();
             Directory.CreateDirectory(_pluginRoot);
-            Directory.CreateDirectory(Path.Combine(_pluginRoot, "subscription"));
+            EnsureSubscriptionDirectory();
             CleanStaleStagingOnStartup();
 
             var sourceDirectories = Directory.EnumerateDirectories(_pluginRoot)
-                .Where(path => !Path.GetFileName(path).StartsWith('.')
-                    && !Path.GetFileName(path).Equals("subscription", StringComparison.OrdinalIgnoreCase))
+                .Where(path => !Path.GetFileName(path).StartsWith('.'))
                 .ToArray();
             var installedNames = sourceDirectories
                 .Select(Path.GetFileName)
@@ -512,6 +512,32 @@ public sealed class PluginCatalog(
             if (!_plugins.TryGetValue(pluginName, out var active) || active.Descriptor.DirectoryPath != stagingDirectory)
                 TryDeleteSnapshot(stagingDirectory);
         }
+    }
+
+    private void EnsureSubscriptionDirectory()
+    {
+        var legacy = Path.Combine(_pluginRoot, "subscription");
+        var legacyStorage = Directory.Exists(legacy)
+            && !File.Exists(Path.Combine(legacy, "plugin.json"))
+            && !Directory.EnumerateFiles(legacy, "*.dll", SearchOption.TopDirectoryOnly).Any();
+        if (legacyStorage && !Directory.Exists(SubscriptionRoot))
+            Directory.Move(legacy, SubscriptionRoot);
+        else Directory.CreateDirectory(SubscriptionRoot);
+
+        if (!legacyStorage || !Directory.Exists(legacy)) return;
+        var legacyState = Path.Combine(legacy, "subscriptions.json");
+        if (File.Exists(legacyState))
+        {
+            var state = Path.Combine(SubscriptionRoot, "subscriptions.json");
+            if (File.Exists(state))
+                throw new InvalidOperationException("Both legacy and current plugin subscription files exist; keep both and resolve the conflict before starting the host.");
+            File.Move(legacyState, state);
+        }
+        var legacyDownloads = Path.Combine(legacy, ".downloads");
+        var downloads = Path.Combine(SubscriptionRoot, ".downloads");
+        if (Directory.Exists(legacyDownloads) && !Directory.Exists(downloads))
+            Directory.Move(legacyDownloads, downloads);
+        if (!Directory.EnumerateFileSystemEntries(legacy).Any()) Directory.Delete(legacy);
     }
 
     private async ValueTask DisposePackageAsync(LoadedPlugin package)
