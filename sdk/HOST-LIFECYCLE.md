@@ -88,6 +88,12 @@ Jint loader 为每个声明平台构建终端，`hooks/policy` 可被平台级�
 
 策略 registry 按 `(pluginKey, platform)` 保存快照，避免第二个平台覆盖第一个。模型缓存也携带终端版本信息；失效后迟到的旧查询不能覆盖新缓存。
 
+### 3.4 模型目录查询
+
+`ModelCatalog` 向每个平台的 `GetModelsAsync` 传入关联调用方取消令牌的 **25 秒超时令牌**，等待返回任务也受同一截止时间限制。模型广场和 `/v1/models` 并行汇总已启用平台；某个平台超时或异常时跳过其本轮结果并记录日志，其他插件模型仍返回。单平台查询/刷新会保留错误，调用方主动取消仍向上传播，不当作成功的空列表。
+
+模型广场手动刷新直接合并本轮刷新结果，不再立即重新查询一次所有插件。超时结果不写入缓存；忽略取消的原生插件仍由 `TrackedTerminal` 跟踪到真实退出，超时不代表已强制终止插件。25 秒针对单次插件模型查询，不是整个模型广场 HTTP 请求的总预算；models.dev 能力补全仍使用独立流程。
+
 ## 4. 一次模型调用
 
 源码：[API 入口](../src/Router.Host/Api/ApiEndpoints.cs)、[RouterPipeline](../src/Router.Host/Pipeline/RouterPipeline.cs)、[执行器](../src/Router.Infrastructure/Services/PluginProxyRuntime.cs)。

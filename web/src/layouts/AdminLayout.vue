@@ -30,6 +30,10 @@ const currentUser = computed(() => auth.principal.value)
 type NavItem = { to: string; label: string; icon: Component; children?: NavItem[] }
 
 const pluginQuery = useQuery({ queryKey: ['plugins'], queryFn: api.plugins, staleTime: 30_000 })
+const versionQuery = useQuery({ queryKey: ['host-version'], queryFn: api.hostVersion, staleTime: 60_000 })
+const hostVersion = computed(() => versionQuery.data.value?.version
+  ? `v${versionQuery.data.value.version}`
+  : versionQuery.isError.value ? '版本获取失败' : '版本加载中…')
 const coreNavItems: NavItem[] = [
   { to: '/', label: '总览', icon: HomeOutline },
   { to: '/analytics', label: '分析数据', icon: AnalyticsOutline },
@@ -109,7 +113,7 @@ function closeMobileMenu() {
       </nav>
       <div class="sidebar-footer">
         <div class="health-dot"><span />服务运行中</div>
-        <span class="version-label">MVP · v0.1</span>
+        <span class="version-label" aria-label="宿主版本">{{ hostVersion }}</span>
       </div>
     </NLayoutSider>
 
@@ -159,6 +163,9 @@ function closeMobileMenu() {
           </div>
         </div>
       </nav>
+      <div class="sidebar-footer">
+        <span class="version-label" aria-label="宿主版本">{{ hostVersion }}</span>
+      </div>
     </NDrawerContent>
   </NDrawer>
 </template>

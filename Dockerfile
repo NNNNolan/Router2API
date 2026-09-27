@@ -18,7 +18,8 @@ COPY src/Router.Host/Router.Host.csproj src/Router.Host/
 RUN dotnet restore src/Router.Host/Router.Host.csproj -a "$TARGETARCH"
 COPY src/ ./src/
 COPY --from=frontend-build /src/web/dist ./web/dist
-RUN dotnet publish src/Router.Host/Router.Host.csproj -c Release -a "$TARGETARCH" --self-contained false -o /app/publish --no-restore /p:UseAppHost=false
+ARG HOST_VERSION
+RUN dotnet publish src/Router.Host/Router.Host.csproj -c Release -a "$TARGETARCH" --self-contained false -o /app/publish --no-restore /p:UseAppHost=false -p:HostVersion="$HOST_VERSION"
 
 # 仅复制目标架构的 ICU 和时区文件，不运行目标架构程序。
 FROM mcr.microsoft.com/dotnet/runtime-deps:10.0-alpine-extra AS runtime-deps

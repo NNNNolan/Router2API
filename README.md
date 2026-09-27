@@ -37,6 +37,12 @@ dotnet build Router2API.slnx --disable-build-servers -m:1 -p:ConcurrentBuild=fal
 
 前端源代码在 `web`，构建产物不提交。`pnpm --dir web build` 会生成 `web/dist` 并同步覆盖 `src/Router.Host/wwwroot`；随后构建宿主会将静态文件复制到运行目录。Docker 也从源码构建前端。不安装任何插件时，管理后台仍可启动，但没有提供方模型。
 
+### 宿主版本
+
+当前源码默认版本为 **2.0.3**，在 `src/Router.Host/Router.Host.csproj` 的 `Version` 中维护。管理后台通过需管理员会话的 `GET /api/admin/version` 读取实际运行的宿主版本，并显示在桌面侧栏和移动端菜单底部；前端不再写死版本号。
+
+Docker Release 构建会将 tag 对应版本通过 `HOST_VERSION` 构建参数写入宿主。手动构建可用 `-p:HostVersion=2.0.3`，手动 Docker 构建可用 `--build-arg HOST_VERSION=2.0.3`；未指定时使用源码默认值。该版本独立于 Contracts 和插件版本，只有更换并启动新宿主后，页面才会显示新版本。
+
 ### 第一次启动先设置新凭据
 
 仓库不提供默认可用管理员密码/API Key，也不携带开发环境的 User Secrets：

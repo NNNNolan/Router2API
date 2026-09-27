@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Router.Contracts.Domain;
 using Router.Contracts.Host;
@@ -50,23 +51,38 @@ public sealed class ModelRouter(IPlatformRegistry platforms) : IModelRouter
     }
 }
 
-/// <summary>聚合并缓存插件模型描述。</summary>
+/// <summary>并行聚合插件模型，隔离单个平台故障；每次插件查询限时 25 秒并按声明缓存。</summary>
+/// <param name="platforms">当前已注册的平台。</param>
+/// <param name="transport">模型发现的默认直连客户端工厂。</param>
+/// <param name="logger">记录具体插件和平台的模型查询故障。</param>
+/// <param name="timeProvider">超时计时器，缺省使用系统时间。</param>
 public sealed class ModelCatalog(
     IPlatformRegistry platforms,
-    ProxyTransportFactory transport) : IModelCatalog
+    ProxyTransportFactory transport,
+    ILogger<ModelCatalog>? logger = null,
+    TimeProvider? timeProvider = null) : IModelCatalog
 {
+    private static readonly TimeSpan ModelQueryTimeout = TimeSpan.FromSeconds(25);
     private readonly ConcurrentDictionary<string, CacheSlot> _cache = new(StringComparer.OrdinalIgnoreCase);
 
     public async Task<IReadOnlyList<ModelDescriptor>> ListAsync(CancellationToken cancellationToken = default)
     {
-        var values = new List<ModelDescriptor>();
-        foreach (var platform in platforms.All.Where(item => item.Enabled))
+        cancellationToken.ThrowIfCancellationRequested();
+        var results = await Task.WhenAll(platforms.All.Where(item => item.Enabled).Select(async platform =>
         {
-            var models = await ListAsync(platform.Name, cancellationToken);
-            values.AddRange(models.Select(model => model with { Id = $"{platform.Name}/{model.Id}" }));
-        }
-
-        return values;
+            try
+            {
+                var models = await ListAsync(platform.Name, cancellationToken);
+                return models.Select(model => model with { Id = $"{platform.Name}/{model.Id}" }).ToArray();
+            }
+            catch (Exception) when (!cancellationToken.IsCancellationRequested)
+            {
+                // 单个平台查询失败不能阻断其他插件；具体错误由 QueryAsync 记录。
+                return [];
+            }
+        }));
+        cancellationToken.ThrowIfCancellationRequested();
+        return results.SelectMany(models => models).ToArray();
     }
 
     public Task<IReadOnlyList<ModelDescriptor>> ListAsync(
@@ -83,24 +99,44 @@ public sealed class ModelCatalog(
     {
         cancellationToken.ThrowIfCancellationRequested();
         var registration = platforms.Get(platform);
-        if (registration is null) return [];
+        if (registration is null || !registration.Enabled) return [];
         if (forceRefresh) _cache.TryRemove(platform, out _);
         var slot = _cache.GetOrAdd(platform, _ => new CacheSlot());
         var cached = Volatile.Read(ref slot.Value);
         if (!forceRefresh && registration.ModelCacheTtl > TimeSpan.Zero
             && cached is not null && ReferenceEquals(cached.Terminal, registration.Terminal) && cached.ExpiresAt > DateTimeOffset.UtcNow)
             return cached.Models;
-        using var client = transport.CreateClient(null, new PluginHttpClientOptions
+        using var deadline = new CancellationTokenSource(ModelQueryTimeout, timeProvider ?? TimeProvider.System);
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, deadline.Token);
+        try
         {
-            AllowAutoRedirect = true, RequestTimeout = TimeSpan.FromSeconds(30)
-        });
-        client.DefaultRequestHeaders.UserAgent.ParseAdd("Router2API/1.0 model-discovery");
-        var models = await registration.Terminal.GetModelsAsync(
-            new ModelQueryContext(HttpClient: client, ForceRefresh: forceRefresh), cancellationToken);
-        // Invalidation removes the slot. A late result from an old generation cannot republish it.
-        if (registration.ModelCacheTtl > TimeSpan.Zero)
-            Volatile.Write(ref slot.Value, new CacheEntry(registration.Terminal, models, DateTimeOffset.UtcNow.Add(registration.ModelCacheTtl)));
-        return models;
+            using var client = transport.CreateClient(null, new PluginHttpClientOptions
+            {
+                AllowAutoRedirect = true,
+                RequestTimeout = TimeSpan.FromSeconds(30)
+            });
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("Router2API/1.0 model-discovery");
+            var query = registration.Terminal.GetModelsAsync(
+                new ModelQueryContext(HttpClient: client, ForceRefresh: forceRefresh), timeout.Token);
+            // 即使插件返回的异步任务忽略取消，也只等待到截止时间；TrackedTerminal 仍跟踪其真实退出。
+            var models = await query.WaitAsync(timeout.Token);
+            timeout.Token.ThrowIfCancellationRequested();
+            // Invalidation removes the slot. A late result from an old generation cannot republish it.
+            if (registration.ModelCacheTtl > TimeSpan.Zero)
+                Volatile.Write(ref slot.Value, new CacheEntry(registration.Terminal, models, DateTimeOffset.UtcNow.Add(registration.ModelCacheTtl)));
+            return models;
+        }
+        catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested && deadline.IsCancellationRequested)
+        {
+            logger?.LogWarning("plugin model discovery timed out pluginKey={PluginKey} platform={Platform} timeoutSeconds={TimeoutSeconds}",
+                registration.PluginKey, platform, ModelQueryTimeout.TotalSeconds);
+            throw new TimeoutException($"Plugin '{registration.PluginKey}' model discovery timed out after {ModelQueryTimeout.TotalSeconds} seconds.", exception);
+        }
+        catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            logger?.LogWarning(exception, "plugin model discovery failed pluginKey={PluginKey} platform={Platform}", registration.PluginKey, platform);
+            throw;
+        }
     }
 
     public void Invalidate(string? platform = null)

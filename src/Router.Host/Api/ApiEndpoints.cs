@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Security.Cryptography;
+using System.Reflection;
 using Router.Contracts.Domain;
 using Router.Contracts.Host;
 using Router.Contracts.Pipeline;
@@ -21,6 +22,7 @@ public static class ApiEndpoints
         app.MapGet("/api/admin/me", Me);
         app.MapPost("/api/admin/password", ChangePasswordAsync);
         app.MapGet("/api/admin/health", () => Results.Ok(new { ok = true, utc = DateTimeOffset.UtcNow }));
+        app.MapGet("/api/admin/version", GetHostVersion);
         app.MapGet("/api/admin/api-key", (ApiKeyService keys) => Results.Ok(new { key = keys.Masked() }));
         app.MapGet("/api/admin/api-key/raw", (ApiKeyService keys) => Results.Ok(new { key = keys.Current }));
         app.MapPost("/api/admin/api-key/rotate", (ApiKeyService keys) => Results.Ok(new { key = keys.Rotate() }));
@@ -80,6 +82,15 @@ public static class ApiEndpoints
         app.MapPost("/api/admin/test/proxy/{proxyId}", TestProxyAsync);
         app.MapPost("/api/admin/test/compare", CompareAsync);
         app.MapGet("/api/admin/test/sessions", () => Results.Ok(Array.Empty<object>()));
+    }
+
+    /// <summary>读取实际运行的宿主版本，保留预发布标签，但不把构建提交号作为版本号展示。</summary>
+    internal static IResult GetHostVersion()
+    {
+        var assembly = typeof(ApiEndpoints).Assembly;
+        var version = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
+            .Split('+', 2)[0] ?? assembly.GetName().Version?.ToString(3) ?? "unknown";
+        return Results.Ok(new { version });
     }
 
     private static IResult Me(HttpContext context)
@@ -156,12 +167,25 @@ public static class ApiEndpoints
         IPlatformRegistry platforms,
         CancellationToken cancellationToken)
     {
-        await Task.WhenAll(
+        var results = await Task.WhenAll(
             platforms.All
                 .Where(platform => platform.Enabled)
-                .Select(platform => modelCatalog.RefreshAsync(platform.Name, cancellationToken)));
+                .Select(async platform =>
+                {
+                    try
+                    {
+                        var models = await modelCatalog.RefreshAsync(platform.Name, cancellationToken);
+                        return models.Select(model => model with { Id = $"{platform.Name}/{model.Id}" }).ToArray();
+                    }
+                    catch (Exception) when (!cancellationToken.IsCancellationRequested)
+                    {
+                        return [];
+                    }
+                }));
 
-        var pluginModels = await modelCatalog.ListAsync(cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+        // 直接使用本轮刷新结果，避免无缓存或失败插件被再次调用并再等一轮超时。
+        var pluginModels = results.SelectMany(models => models).ToArray();
         var metadata = await ReadModelMetadataAsync(metadataCatalog, forceRefresh: true, cancellationToken);
         return Results.Ok(ToModelPlazaDto(pluginModels, metadata, platforms));
     }

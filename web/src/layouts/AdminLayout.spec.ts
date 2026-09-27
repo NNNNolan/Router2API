@@ -28,8 +28,11 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-async function renderPlugins(initial: PluginDescriptor[]) {
+async function renderPlugins(initial: PluginDescriptor[], version: string | Error = '2.0.3') {
   let plugins = initial
+  const getVersion = vi.spyOn(api, 'hostVersion')
+  if (version instanceof Error) getVersion.mockRejectedValue(version)
+  else getVersion.mockResolvedValue({ version })
   vi.spyOn(api, 'plugins').mockImplementation(async () => plugins)
   vi.spyOn(api, 'pluginRepositories').mockResolvedValue([])
   vi.spyOn(api, 'pluginInstallations').mockResolvedValue([])
@@ -79,6 +82,19 @@ function expectMenus(keys: string[]) {
 }
 
 describe('插件侧栏菜单', () => {
+  it.each(['2.0.3', '2.1.0-rc.1'])('桌面和移动端显示后端返回的宿主版本 %s，不使用插件版本', async version => {
+    const { view } = await renderPlugins([plugin('example')], version)
+    await vi.waitFor(() => expect(view.findAll('[aria-label="宿主版本"]').map(label => label.text())).toEqual([`v${version}`, `v${version}`]))
+    expect(api.hostVersion).toHaveBeenCalledTimes(1)
+    expect(view.text()).not.toContain('MVP · v0.1')
+  })
+
+  it('版本接口失败时明确提示，不伪造版本且不影响导航', async () => {
+    const { view } = await renderPlugins([plugin('active')], new Error('版本接口不可用'))
+    await vi.waitFor(() => expect(view.findAll('[aria-label="宿主版本"]').map(label => label.text())).toEqual(['版本获取失败', '版本获取失败']))
+    expectMenus(['active'])
+  })
+
   it('只展示正在运行且提供主页面的插件', async () => {
     await renderPlugins([
       plugin('active'), plugin('disabled', 'Disabled'), plugin('draining', 'Draining'),

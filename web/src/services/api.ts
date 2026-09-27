@@ -215,6 +215,7 @@ export const api = {
   login: async (username: string, password: string) => normalizePrincipal(await request<unknown>('/api/admin/login', { method: 'POST', body: { username, password } })),
   logout: () => request<void>('/api/admin/logout', { method: 'POST' }),
   me: async () => normalizePrincipal(await request<unknown>('/api/admin/me')),
+  hostVersion: () => request<{ version: string }>('/api/admin/version'),
   metrics: async () => normalizeMetrics(await request<unknown>('/api/admin/metrics')),
   analyticsOverview: (params: { fromUtc?: Date; toUtc?: Date; timezone?: string } = {}) => request<{ range: AnalyticsReport; live: unknown }>(`/api/admin/analytics/overview${queryString(params)}`),
   analytics: (params: { fromUtc?: Date; toUtc?: Date; platform?: string; model?: string; bucket?: string } = {}) => request<AnalyticsReport>(`/api/admin/analytics${queryString(params)}`),
