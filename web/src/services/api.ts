@@ -198,12 +198,16 @@ function queryString(values: Record<string, unknown>): string {
   const text = params.toString(); return text ? `?${text}` : ''
 }
 
-export async function request<T>(path: string, init: ApiRequestInit = {}): Promise<T> {
+async function sendRequest(path: string, init: ApiRequestInit = {}): Promise<Response> {
   const headers = new Headers(init.headers); const csrf = typeof document !== 'undefined' ? document.cookie.split('; ').find(item => item.startsWith('router_admin_csrf='))?.split('=').slice(1).join('=') : undefined
   if (csrf && ['POST', 'PUT', 'PATCH', 'DELETE'].includes((init.method ?? 'GET').toUpperCase())) headers.set('X-CSRF-Token', decodeURIComponent(csrf))
   let body = init.body
   if (body !== undefined && body !== null && typeof body !== 'string' && !(body instanceof FormData)) { headers.set('Content-Type', 'application/json'); body = JSON.stringify(body) }
-  const response = await fetch(path, { ...init, body: body as BodyInit | null | undefined, credentials: 'include', headers })
+  return fetch(path, { ...init, body: body as BodyInit | null | undefined, credentials: 'include', headers })
+}
+
+export async function request<T>(path: string, init: ApiRequestInit = {}): Promise<T> {
+  const response = await sendRequest(path, init)
   const text = await response.text(); let payload: unknown
   if (text) { try { payload = JSON.parse(text) } catch { payload = text } }
   if (!response.ok) { const raw = asObject(payload); throw new ApiError(response.status, asString(raw.error) ?? `请求失败（${response.status}）`) }
@@ -263,9 +267,13 @@ export const api = {
   rotateApiKey: () => request<{ key: string }>('/api/admin/api-key/rotate', { method: 'POST' }),
   config: () => request<ConfigSnapshot>('/api/admin/config'),
   saveConfig: (payload: Record<string, unknown>) => request<ConfigSnapshot>('/api/admin/config', { method: 'PUT', body: payload }),
-  v1Request: (path: string, payload: Record<string, unknown>, key: string) => request<unknown>(path, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${key}` },
-    body: payload,
-  }),
+  v1Request: async (path: string, payload: Record<string, unknown>, key: string) => {
+    const response = await sendRequest(path, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${key}` },
+      body: payload,
+    })
+    // 测试窗口保留成功及失败响应的原始正文，不解析 JSON 或提取 error。
+    return { status: response.status, body: await response.text() }
+  },
 }

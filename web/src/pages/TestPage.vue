@@ -1,9 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import DOMPurify from 'dompurify'
-import { marked } from 'marked'
-import { useMessage, NAlert, NButton, NCard, NCode, NForm, NFormItem, NInput, NSelect, NSpin, NSpace } from 'naive-ui'
+import { useMessage, NAlert, NButton, NCard, NForm, NFormItem, NInput, NSelect, NSpin, NSpace } from 'naive-ui'
 import { api, type ModelDescriptor } from '@/services/api'
+import { formatJsonResponse } from '@/services/formatJsonResponse'
 
 const message = useMessage()
 const model = ref('')
@@ -13,7 +12,9 @@ const models = ref<ModelDescriptor[]>([])
 const modelsLoading = ref(false)
 const modelsError = ref('')
 const prompt = ref('用一句话说明这个模型的能力。')
-const responseBody = ref<unknown | null>(null)
+const responseBody = ref<string | null>(null)
+const formattedResponse = computed(() => responseBody.value === null ? '' : formatJsonResponse(responseBody.value))
+const responseStatus = ref<number | null>(null)
 const responseElapsedMs = ref<number | null>(null)
 const testing = ref(false)
 const error = ref('')
@@ -37,54 +38,6 @@ const modelOptions = computed(() => models.value.map(item => ({
   value: item.id,
 })))
 
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
-}
-
-function textFromContent(value: unknown): string {
-  if (typeof value === 'string') return value
-  if (!Array.isArray(value)) return asRecord(value)?.text && typeof asRecord(value)?.text === 'string' ? asRecord(value)?.text as string : ''
-  return value.map(item => {
-    const record = asRecord(item)
-    return typeof record?.text === 'string' ? record.text : typeof record?.content === 'string' ? record.content : ''
-  }).filter(Boolean).join('\n\n')
-}
-
-function extractResponseText(value: unknown): string {
-  const body = asRecord(value)
-  if (!body) return ''
-  const choice = Array.isArray(body.choices) ? asRecord(body.choices[0]) : null
-  const message = asRecord(choice?.message)
-  const chatText = textFromContent(message?.content ?? choice?.text)
-  if (chatText) return chatText
-  if (typeof body.output_text === 'string' && body.output_text) return body.output_text
-  if (Array.isArray(body.output)) {
-    const outputText = body.output.map(item => {
-      const record = asRecord(item)
-      return textFromContent(record?.content ?? record?.text)
-    }).filter(Boolean).join('\n\n')
-    if (outputText) return outputText
-  }
-  return textFromContent(body.content)
-}
-
-const rawResult = computed(() => responseBody.value === null ? '' : JSON.stringify(responseBody.value, null, 2))
-const responseText = computed(() => extractResponseText(responseBody.value))
-const responseMarkdown = computed(() => {
-  const fence = String.fromCharCode(96).repeat(3)
-  const source = responseText.value || (rawResult.value ? `${fence}json\n${rawResult.value}\n${fence}` : '')
-  return source ? DOMPurify.sanitize(marked.parse(source, { gfm: true, breaks: true, async: false })) : ''
-})
-const responseSummary = computed(() => {
-  const body = asRecord(responseBody.value)
-  const usage = asRecord(body?.usage)
-  return {
-    id: typeof body?.id === 'string' ? body.id : '',
-    model: typeof body?.model === 'string' ? body.model : model.value,
-    tokens: typeof usage?.total_tokens === 'number' ? usage.total_tokens : typeof usage?.totalTokens === 'number' ? usage.totalTokens : null,
-  }
-})
-
 async function loadModels() {
   modelsLoading.value = true
   modelsError.value = ''
@@ -106,6 +59,7 @@ async function runTest() {
   }
   error.value = ''
   responseBody.value = null
+  responseStatus.value = null
   responseElapsedMs.value = null
   testing.value = true
   const startedAt = performance.now()
@@ -119,8 +73,9 @@ async function runTest() {
     const { key } = await api.rawApiKey()
     if (!key) throw new Error('宿主 API Key 不可用，请先检查 API Key 配置')
     const result = await api.v1Request(endpointPaths[endpoint.value], payload, key)
-    responseBody.value = result
-    message.success('请求完成')
+    responseBody.value = result.body
+    responseStatus.value = result.status
+    if (result.status >= 200 && result.status < 300) message.success('请求完成')
   } catch (reason) {
     error.value = reason instanceof Error ? reason.message : '请求失败'
   } finally {
@@ -154,12 +109,11 @@ onMounted(() => { void loadModels() })
     <NCard title="响应结果" :bordered="false">
       <NSpin v-if="testing" size="small" />
       <NAlert v-else-if="error" type="error" title="请求失败">{{ error }}</NAlert>
-      <div v-else-if="rawResult" class="response-panel" aria-live="polite">
-        <div class="response-toolbar"><span class="response-state">已完成</span><span v-if="responseSummary.model">{{ responseSummary.model }}</span><span v-if="responseSummary.tokens !== null">{{ responseSummary.tokens }} tokens</span><span v-if="responseElapsedMs !== null">耗时 {{ responseElapsedMs }} ms</span></div>
-        <div class="response-markdown" v-html="responseMarkdown" />
-        <details class="response-raw"><summary>查看原始 JSON</summary><NCode :code="rawResult" language="json" word-wrap /></details>
+      <div v-else-if="responseBody !== null" class="response-panel" aria-live="polite">
+        <div class="response-toolbar"><span>HTTP {{ responseStatus }}</span><span v-if="responseElapsedMs !== null">耗时 {{ responseElapsedMs }} ms</span></div>
+        <pre class="response-text" v-text="formattedResponse" />
       </div>
-      <div v-else class="empty-panel">发送一次请求，响应会以 Markdown 形式显示在这里。</div>
+      <div v-else class="empty-panel">发送一次请求，这里将显示完整响应正文：JSON 自动缩进并显示中文，其他内容保持原样。</div>
     </NCard>
   </div>
   <NCard class="info-card" :bordered="false">
