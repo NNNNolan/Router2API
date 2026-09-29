@@ -121,7 +121,7 @@ categories:
 
 change-template: "- $TITLE ([#$NUMBER]($URL))"
 change-title-escapes: '\<*_&'
-no-changes-template: "- 暂无可列出的合并 PR。"
+no-changes-template: "- 暂无合并 PR；正式发布时将根据提交记录生成更新内容。"
 sort-by: merged_at
 sort-direction: descending
 

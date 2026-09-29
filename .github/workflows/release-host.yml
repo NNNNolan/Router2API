@@ -6,13 +6,19 @@ on:
       - main
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 已发布版本标签（仅更新说明，不构建 Docker 镜像）
+        required: true
+        type: string
 
 permissions:
   contents: read
 
 jobs:
   draft:
-    if: startsWith(github.ref, 'refs/heads/')
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -22,7 +28,7 @@ jobs:
         uses: release-drafter/release-drafter@v7
 
   docker:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     env:
       DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME || secrets.DOCKERHUB_USERNAME }}
@@ -58,12 +64,23 @@ jobs:
 
   release:
     needs: docker
+    if: >-
+      always() &&
+      ((github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && needs.docker.result == 'success') ||
+      github.event_name == 'workflow_dispatch')
     runs-on: ubuntu-latest
     permissions:
       contents: write
       pull-requests: read
     steps:
+      - name: Check out full history
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.release_tag || github.sha }}
+          fetch-depth: 0
+
       - name: Publish Release Drafter notes
+        if: github.event_name == 'push'
         uses: release-drafter/release-drafter@v7
         with:
           name: Router2API ${{ github.ref_name }}
@@ -71,3 +88,110 @@ jobs:
           publish: true
           prerelease: ${{ contains(github.ref_name, '-') }}
           latest: ${{ contains(github.ref_name, '-') && 'false' || 'true' }}
+
+      - name: Add commit changes to published notes
+        uses: actions/github-script@v8
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const { execFileSync } = require('node:child_process')
+
+            const tag = context.eventName === 'workflow_dispatch'
+              ? context.payload.inputs?.release_tag
+              : context.ref.replace(/^refs\/tags\//, '')
+            if (!tag || !/^v[0-9][0-9A-Za-z.+-]*$/.test(tag)) {
+              throw new Error(`无效的 Release 标签：${tag}`)
+            }
+
+            const sha = execFileSync('git', ['rev-list', '-n', '1', `refs/tags/${tag}`], {
+              encoding: 'utf8',
+            }).trim()
+            let previousTag = ''
+            try {
+              previousTag = execFileSync(
+                'git',
+                ['describe', '--tags', '--abbrev=0', `${sha}^`],
+                { encoding: 'utf8' },
+              ).trim()
+            } catch {}
+            const commits = execFileSync(
+              'git',
+              ['log', '--no-merges', '--format=%H%x09%s', previousTag ? `${previousTag}..${sha}` : sha],
+              { encoding: 'utf8' },
+            ).trim()
+
+            const categoryTitles = {
+              breaking: '🚨 重大变更 | Breaking Changes',
+              features: '🚀 Features | 新特性',
+              fixes: '🐛 Bug Fixes | 修复',
+              performance: '⚡ Performance & UX | 性能与体验优化',
+              refactoring: '♻️ Refactoring | 代码重构',
+              documentation: '📝 Documentation | 文档更新',
+              reverts: '⏪ Reverts | 代码回滚',
+              maintenance: '🧰 Maintenance & CI | 内部维护与构建',
+              other: '📦 其他更新',
+            }
+            const changes = Object.fromEntries(
+              Object.keys(categoryTitles).map((category) => [category, []]),
+            )
+
+            for (const line of commits ? commits.split('\n') : []) {
+              const separator = line.indexOf('\t')
+              const commitSha = line.slice(0, separator)
+              const subject = line.slice(separator + 1)
+              const match = subject.match(/^([a-z][a-z0-9-]*)(?:\(([^)]+)\))?(!)?:\s+(.+)$/i)
+              const type = match?.[1]?.toLowerCase()
+              const scope = match?.[2]
+              const title = match?.[4] ?? subject
+
+              if (scope === 'release' && ['chore', 'ci'].includes(type)) continue
+
+              let category = 'other'
+              if (match?.[3]) category = 'breaking'
+              else if (type === 'feat') category = 'features'
+              else if (type === 'fix') category = 'fixes'
+              else if (type === 'perf') category = 'performance'
+              else if (type === 'refactor') category = 'refactoring'
+              else if (type === 'docs') category = 'documentation'
+              else if (type === 'revert') category = 'reverts'
+              else if (['build', 'chore', 'ci', 'style', 'test'].includes(type)) category = 'maintenance'
+
+              const escapeMarkdown = (value) => value
+                .replace(/[\\`*_{}\[\]()#+.!|>~-]/g, '\\$&')
+                .replace(/@/g, '@\u200b')
+              const scopePrefix = scope ? `**${escapeMarkdown(scope)}** ` : ''
+              const escapedTitle = escapeMarkdown(title)
+              const commitUrl = `${process.env.GITHUB_SERVER_URL}/${context.repo.owner}/${context.repo.repo}/commit/${commitSha}`
+              changes[category].push(`- ${scopePrefix}${escapedTitle} ([\`${commitSha.slice(0, 7)}\`](${commitUrl}))`)
+            }
+
+            const order = Object.keys(categoryTitles)
+            const changeSections = order
+              .filter((category) => changes[category].length > 0)
+              .flatMap((category) => [`### ${categoryTitles[category]}`, ...changes[category]])
+              .join('\n\n') || '- 本次版本没有检测到提交更新。'
+
+            const { data: release } = await github.rest.repos.getReleaseByTag({
+              ...context.repo,
+              tag,
+            })
+            const existingBody = release.body ?? ''
+            const dockerSection = existingBody.indexOf('## Docker 镜像')
+            if (dockerSection < 0) {
+              throw new Error('Release 正文缺少“## Docker 镜像”区块，已停止覆盖正文。')
+            }
+
+            const body = [
+              '## 更新内容',
+              '',
+              changeSections,
+              '',
+              existingBody.slice(dockerSection).trim(),
+            ].join('\n')
+
+            await github.rest.repos.updateRelease({
+              ...context.repo,
+              release_id: release.id,
+              body,
+            })
+            core.info(`已将 ${previousTag || '仓库初始提交'}..${tag} 的提交说明写入 Release。`)
