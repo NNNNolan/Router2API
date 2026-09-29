@@ -32,6 +32,7 @@ public sealed class PluginCatalog(
     private readonly ConcurrentDictionary<string, RuntimePlugin> _plugins = new(StringComparer.OrdinalIgnoreCase);
     private readonly SemaphoreSlim _reloadLock = new(1, 1);
     private readonly string _pluginRoot = Path.Combine(AppContext.BaseDirectory, "plugins");
+    internal string PluginRoot => _pluginRoot;
     private string DisabledPluginRoot => Path.Combine(_pluginRoot, ".disabled");
     private string SubscriptionRoot => Path.Combine(_pluginRoot, ".subscription");
     private int _endpointsMapped;
@@ -49,7 +50,8 @@ public sealed class PluginCatalog(
     public PluginMainPage? GetMainPage(string pluginKey)
         => _plugins.TryGetValue(pluginKey, out var plugin) ? plugin.MainPage : null;
 
-    public async Task InstallPackageAsync(PluginReleaseEntry entry, string packageDirectory, CancellationToken cancellationToken)
+    public async Task InstallPackageAsync(PluginReleaseEntry entry, string packageDirectory, CancellationToken cancellationToken,
+        bool activate = false)
     {
         var pluginKey = entry.Id;
         if (!SafePluginKey(pluginKey)) throw new ArgumentException("Invalid plugin key.", nameof(entry));
@@ -61,7 +63,10 @@ public sealed class PluginCatalog(
             var backup = Path.Combine(_pluginRoot, ".backup", pluginKey + "-" + Guid.NewGuid().ToString("N"));
             var previous = _plugins.TryGetValue(pluginKey, out var old) ? old : null;
             var previousDescriptor = previous?.Descriptor;
-            var wasDisabled = File.Exists(Path.Combine(DisabledPluginRoot, pluginKey + ".disabled"));
+            var disabledMarker = Path.Combine(DisabledPluginRoot, pluginKey + ".disabled");
+            var wasDisabled = File.Exists(disabledMarker);
+            var savedDisabledMarker = wasDisabled && activate
+                ? await File.ReadAllTextAsync(disabledMarker, cancellationToken) : null;
             if (Directory.Exists(target))
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(backup)!);
@@ -70,7 +75,8 @@ public sealed class PluginCatalog(
             try
             {
                 Directory.Move(packageDirectory, target);
-                if (wasDisabled)
+                if (savedDisabledMarker is not null) File.Delete(disabledMarker);
+                if (wasDisabled && !activate)
                 {
                     await KeepDisabledAsync(pluginKey, target, cancellationToken);
                     var disabled = _plugins[pluginKey];
@@ -89,7 +95,7 @@ public sealed class PluginCatalog(
                         JsonSerializer.Serialize(disabled.Descriptor), cancellationToken);
                 }
                 else await LoadDirectoryAsync(pluginKey, target, cancellationToken);
-                if (!wasDisabled && (!_plugins.TryGetValue(pluginKey, out var current)
+                if ((!wasDisabled || activate) && (!_plugins.TryGetValue(pluginKey, out var current)
                     || current.Descriptor.State != "Active" || ReferenceEquals(current, previous)))
                     throw new InvalidOperationException("Plugin activation failed; previous package restored.");
             }
@@ -97,6 +103,8 @@ public sealed class PluginCatalog(
             {
                 if (Directory.Exists(target)) Directory.Delete(target, recursive: true);
                 if (Directory.Exists(backup)) Directory.Move(backup, target);
+                if (savedDisabledMarker is not null)
+                    await File.WriteAllTextAsync(disabledMarker, savedDisabledMarker, CancellationToken.None);
                 if (previous is null) _plugins.TryRemove(pluginKey, out _);
                 else
                 {

@@ -33,6 +33,11 @@ const savingRepository = ref(false)
 const installing = ref(false)
 const updating = ref(false)
 const reloading = ref(false)
+const uploadModalOpen = ref(false)
+const uploadFile = ref<File | null>(null)
+const uploadInput = ref<HTMLInputElement | null>(null)
+const uploading = ref(false)
+const uploadError = ref('')
 const togglingKey = ref<string | null>(null)
 const deletingKey = ref<string | null>(null)
 const modalError = ref('')
@@ -110,6 +115,31 @@ async function reload() {
   catch (error) { message.error(error instanceof Error ? error.message : '插件重新加载失败') }
   finally { reloading.value = false }
 }
+function selectUpload(event: Event) {
+  uploadFile.value = (event.target as HTMLInputElement).files?.[0] ?? null
+  uploadError.value = ''
+}
+async function uploadPlugin() {
+  const file = uploadFile.value
+  if (!file || !file.name.toLowerCase().endsWith('.zip') || file.size <= 0 || file.size > 100 * 1024 * 1024) {
+    uploadError.value = '请选择非空 ZIP 文件，最大 100 MiB'
+    return
+  }
+  uploading.value = true
+  uploadError.value = ''
+  try {
+    const plugin = await api.uploadPlugin(file)
+    if (plugin.state !== 'Active') throw new Error('插件未成功加载，请检查插件状态和日志')
+    message.success(`${plugin.name} 已安装并重新加载`)
+    uploadModalOpen.value = false
+    uploadFile.value = null
+    if (uploadInput.value) uploadInput.value.value = ''
+  } catch (error) { uploadError.value = error instanceof Error ? error.message : '上传插件失败' }
+  finally {
+    try { await refreshLocal() }
+    finally { uploading.value = false }
+  }
+}
 async function togglePlugin(plugin: PluginDescriptor) {
   togglingKey.value = plugin.pluginKey
   try {
@@ -183,13 +213,13 @@ function openSubscribe() {
   <div class="plugin-manager">
     <NCard :bordered="false" class="plugin-manager-head"><div class="plugin-manager-headline">
       <div><span class="page-eyebrow">PLUGIN LIBRARY</span><h2>插件管理</h2><p>查看运行状态，按需安装和更新仓库中的插件。</p></div>
-      <div class="plugin-manager-actions"><NButton secondary :loading="reloading" @click="reload">重新加载</NButton><NButton type="primary" @click="openSubscribe">添加订阅仓库</NButton></div>
+      <div class="plugin-manager-actions"><NButton secondary :loading="reloading" :disabled="uploading" @click="reload">重新加载</NButton><NButton secondary :disabled="uploading" @click="uploadError = ''; uploadModalOpen = true">上传插件 ZIP</NButton><NButton type="primary" @click="openSubscribe">添加订阅仓库</NButton></div>
     </div></NCard>
     <NTabs v-model:value="tab" type="line" animated class="plugin-manager-tabs">
       <NTabPane name="installed" tab="已安装插件">
         <NSpin v-if="pluginsQuery.isPending.value" class="center-spin" />
         <NAlert v-else-if="pluginsQuery.isError.value" type="error">插件列表加载失败，请刷新重试。</NAlert>
-        <NEmpty v-else-if="!plugins.length" description="尚未安装插件，可从 GitHub 仓库选择安装" class="plugin-manager-empty" />
+        <NEmpty v-else-if="!plugins.length" description="尚未安装插件，可上传 ZIP 或从 GitHub 仓库选择安装" class="plugin-manager-empty" />
         <div v-else class="plugin-card-grid"><NCard v-for="plugin in plugins" :key="plugin.pluginKey" class="plugin-card" :bordered="false">
           <div class="plugin-card-head"><div class="plugin-card-symbol">{{ plugin.runtime === 'jint' ? 'JS' : 'C#' }}</div><NTag :type="plugin.state === 'Active' ? 'success' : plugin.state === 'Failed' ? 'error' : 'default'" round>{{ plugin.state === 'Active' ? '运行中' : plugin.state === 'Disabled' ? '已禁用' : plugin.state === 'Draining' ? '正在停止' : '加载失败' }}</NTag></div>
           <h3>{{ plugin.name }}</h3><p class="plugin-card-description">{{ plugin.description || installedSource(plugin.pluginKey)?.description || '此插件尚未提供描述。' }}</p>
@@ -212,6 +242,16 @@ function openSubscribe() {
         </NCard></div>
       </NTabPane>
     </NTabs>
+    <NModal v-model:show="uploadModalOpen" preset="card" title="上传插件 ZIP" :closable="!uploading" :mask-closable="!uploading" :close-on-esc="!uploading" style="width: min(600px, calc(100vw - 32px))">
+      <div class="plugin-subscribe-form">
+        <NAlert type="warning" title="仅上传可信插件">C# / JS 插件可执行代码。相同插件 ID 会完整替换旧包并立即重新加载（已禁用插件也会启用）；加载失败自动恢复旧包。只影响本插件，不重载其他插件。本地覆盖会解除该插件的发行版订阅关联，保留仓库订阅。</NAlert>
+        <p>支持 ZIP 内包含单个插件目录，或 plugin.json / DLL 直接位于 ZIP 根目录；每包一个插件，最大 100 MiB。</p>
+        <label for="plugin-upload-file">插件 ZIP 文件</label>
+        <input id="plugin-upload-file" ref="uploadInput" type="file" accept=".zip,application/zip" :disabled="uploading" @change="selectUpload" />
+        <NAlert v-if="uploadError" type="error" role="alert">{{ uploadError }}</NAlert>
+        <div class="modal-actions"><NButton :disabled="uploading" @click="uploadModalOpen = false">取消</NButton><NButton type="primary" :loading="uploading" :disabled="!uploadFile" @click="uploadPlugin">上传、覆盖并加载</NButton></div>
+      </div>
+    </NModal>
     <NModal v-model:show="subscribeModalOpen" preset="card" title="订阅 GitHub 插件仓库" style="width: min(760px, calc(100vw - 32px))">
       <div class="plugin-subscribe-form"><label for="plugin-repository-input">仓库地址</label><div class="plugin-subscribe-row"><NInput id="plugin-repository-input" v-model:value="repositoryInput" placeholder="owner/repo 或 https://github.com/owner/repo" @keyup.enter="addRepository" /><NButton :loading="savingRepository" @click="addRepository">添加仓库</NButton></div>
         <label for="plugin-repository-select">已订阅仓库</label><NSelect id="plugin-repository-select" v-model:value="selectedRepository" :options="repositoryOptions" placeholder="选择仓库" />

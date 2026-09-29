@@ -239,6 +239,11 @@ export const api = {
   pluginPage: (pluginKey: string) => request<string>(`/api/admin/plugins/${encodeURIComponent(pluginKey)}/page`),
   runPluginTask: (pluginKey: string, taskName: string) => request<void>(`/api/admin/plugins/${encodeURIComponent(pluginKey)}/tasks/${encodeURIComponent(taskName)}/run`, { method: 'POST' }),
   reloadPlugins: async () => (asArray(await request<unknown>('/api/admin/plugins/reload', { method: 'POST' })).map(normalizePlugin)),
+  uploadPlugin: async (file: File) => {
+    const body = new FormData()
+    body.append('file', file)
+    return normalizePlugin(await request<unknown>('/api/admin/plugins/upload', { method: 'POST', body }))
+  },
   setPluginEnabled: (pluginKey: string, enabled: boolean) => request<PluginDescriptor>(`/api/admin/plugins/${encodeURIComponent(pluginKey)}/state`, { method: 'POST', body: { enabled } }),
   deletePlugin: (pluginKey: string) => request<void>(`/api/admin/plugins/${encodeURIComponent(pluginKey)}`, { method: 'DELETE' }),
   pluginRepositories: () => request<PluginRepository[]>('/api/admin/plugin-repositories'),

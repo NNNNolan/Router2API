@@ -13,7 +13,12 @@ namespace Router.Host.Plugins;
 internal sealed class DotNetPackageLoader(IPluginHostFactory hosts) : IPluginPackageLoader
 {
     public string Runtime => "dotnet";
-    public bool CanLoad(string sourceDirectory, string name) => FindMainAssembly(sourceDirectory, name) is not null;
+    public bool CanLoad(string sourceDirectory, string name)
+    {
+        try { return FindMainAssembly(sourceDirectory, name) is not null; }
+        catch (Exception exception) when (exception is JsonException or InvalidDataException or InvalidOperationException)
+        { return true; } // 由 LoadAsync 报告坏清单，不能中断其他插件的发现。
+    }
 
     public async Task<LoadedPlugin> LoadAsync(string name, string sourceDirectory, string snapshotDirectory, CancellationToken cancellationToken)
     {
@@ -110,6 +115,23 @@ internal sealed class DotNetPackageLoader(IPluginHostFactory hosts) : IPluginPac
 
     private static string? FindMainAssembly(string directory, string name)
     {
+        var manifestPath = Path.Combine(directory, "plugin.json");
+        if (File.Exists(manifestPath))
+        {
+            if (new FileInfo(manifestPath).Length > 64 * 1024
+                || (File.GetAttributes(manifestPath) & FileAttributes.ReparsePoint) != 0)
+                throw new InvalidDataException("C# plugin manifest is too large.");
+            using var manifest = JsonDocument.Parse(File.ReadAllText(manifestPath), new JsonDocumentOptions { MaxDepth = 16 });
+            if (manifest.RootElement.TryGetProperty("assembly", out var assembly))
+            {
+                var file = assembly.GetString();
+                if (string.IsNullOrEmpty(file) || file.Contains('/') || file.Contains('\\') || file.Contains(':')
+                    || !file.EndsWith(".dll", StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidDataException("Invalid plugin assembly filename.");
+                var path = Path.Combine(directory, file);
+                return File.Exists(path) ? path : null;
+            }
+        }
         var assemblies = Directory.EnumerateFiles(directory, "*.dll", SearchOption.TopDirectoryOnly).ToArray();
         var named = assemblies.FirstOrDefault(path => Path.GetFileNameWithoutExtension(path).Equals(name, StringComparison.OrdinalIgnoreCase));
         if (named is not null) return named;

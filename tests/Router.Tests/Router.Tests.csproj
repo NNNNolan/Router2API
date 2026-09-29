@@ -8,6 +8,7 @@
     <ProjectReference Include="..\..\src\Router.Contracts\Router.Contracts.csproj" />
     <ProjectReference Include="..\..\src\Router.Infrastructure\Router.Infrastructure.csproj" />
     <ProjectReference Include="..\..\src\Router.Host\Router.Host.csproj" />
+    <ProjectReference Include="..\Fixtures\Plugins.UploadFixture\Plugins.UploadFixture.csproj" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
     <PackageReference Include="MSTest.TestAdapter" Version="4.4.1" />
     <PackageReference Include="MSTest.TestFramework" Version="4.4.1" />

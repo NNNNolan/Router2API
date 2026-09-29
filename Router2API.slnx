@@ -5,6 +5,7 @@
     <Project Path="src/Router.Host/Router.Host.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/Fixtures/Plugins.UploadFixture/Plugins.UploadFixture.csproj" />
     <Project Path="tests/Router.Tests/Router.Tests.csproj" />
   </Folder>
 </Solution>

@@ -16,13 +16,13 @@ public sealed record PluginInstallation(string PluginId, string Owner, string Re
 public sealed record PluginAvailableUpdate(PluginInstallation Installed, PluginReleaseEntry Available, string Tag);
 
 /// <summary>读取公开 GitHub Release 索引，并将用户选择的单个包安装到宿主插件目录。</summary>
-public sealed class PluginReleaseService(IHttpClientFactory clients, PluginCatalog catalog) : IDisposable
+public sealed partial class PluginReleaseService(IHttpClientFactory clients, PluginCatalog catalog) : IDisposable
 {
-    private const long MaxArchiveBytes = 100 * 1024 * 1024;
+    internal const long MaxArchiveBytes = 100 * 1024 * 1024;
     private const long MaxExtractedBytes = 300 * 1024 * 1024;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly SemaphoreSlim _gate = new(1, 1);
-    private readonly string _root = Path.Combine(AppContext.BaseDirectory, "plugins");
+    private readonly string _root = catalog.PluginRoot;
     private string SubscriptionRoot => Path.Combine(_root, ".subscription");
     private string StatePath => Path.Combine(SubscriptionRoot, "subscriptions.json");
 
@@ -187,36 +187,52 @@ public sealed class PluginReleaseService(IHttpClientFactory clients, PluginCatal
         finally { if (Directory.Exists(work)) Directory.Delete(work, recursive: true); }
     }
 
-    private static async Task ExtractAsync(ZipArchive zip, string work, string id, CancellationToken token)
+    private static Task ExtractAsync(ZipArchive zip, string work, string id, CancellationToken token)
+        => ExtractPackageAsync(zip, Path.Combine(work, id), id + "/", token);
+
+    internal static async Task ExtractPackageAsync(ZipArchive zip, string root, string prefix, CancellationToken token)
     {
-        var root = Path.GetFullPath(Path.Combine(work, id));
+        root = Path.GetFullPath(root);
         Directory.CreateDirectory(root);
         long total = 0;
+        var paths = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         if (zip.Entries.Count is 0 or > 2000) throw new InvalidDataException("Plugin archive has an invalid entry count.");
         foreach (var entry in zip.Entries)
         {
             var path = entry.FullName;
-            if (path == id + "/") continue;
-            if (!path.StartsWith(id + "/", StringComparison.Ordinal) || path.Contains('\\')
-                || path.Split('/').Any(part => part is "." or ".." || part.Contains(':'))
-                || ((entry.ExternalAttributes >> 16) & 0xF000) == 0xA000)
+            if (!path.StartsWith(prefix, StringComparison.Ordinal) || path.Contains('\\')
+                || !SafeArchivePath(path)
+                || ((entry.ExternalAttributes >> 16) & 0xF000) == 0xA000
+                || (entry.ExternalAttributes & (int)FileAttributes.ReparsePoint) != 0)
                 throw new InvalidDataException("Plugin archive contains an unsafe path or link.");
-            var target = Path.GetFullPath(Path.Combine(work, path.Replace('/', Path.DirectorySeparatorChar)));
+            if (prefix.Length > 0 && path == prefix) continue;
+            var relative = path[prefix.Length..];
+            if (!paths.Add(relative.TrimEnd('/')))
+                throw new InvalidDataException("Plugin archive contains duplicate paths.");
+            var target = Path.GetFullPath(Path.Combine(root, relative.Replace('/', Path.DirectorySeparatorChar)));
             if (!target.StartsWith(root + Path.DirectorySeparatorChar, OperatingSystem.IsWindows()
                     ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
                 throw new InvalidDataException("Plugin archive path escapes its directory.");
             if (path.EndsWith('/')) { Directory.CreateDirectory(target); continue; }
+            if (entry.Length > MaxExtractedBytes - total) throw new InvalidDataException("Plugin archive is too large after extraction.");
             total += entry.Length;
-            if (total > MaxExtractedBytes) throw new InvalidDataException("Plugin archive is too large after extraction.");
             Directory.CreateDirectory(Path.GetDirectoryName(target)!);
             await using var input = entry.Open();
             await using var output = new FileStream(target, FileMode.CreateNew);
             await CopyBoundedAsync(input, output, entry.Length, token);
+            if (output.Length != entry.Length) throw new InvalidDataException("Plugin archive entry length is invalid.");
         }
         if (!File.Exists(Path.Combine(root, "plugin.json")) &&
             !Directory.EnumerateFiles(root, "*.dll", SearchOption.TopDirectoryOnly).Any())
             throw new InvalidDataException("Plugin archive has no manifest or assembly.");
     }
+
+    private static bool SafeArchivePath(string path)
+        => path.TrimEnd('/').Split('/').All(part =>
+            part.Length > 0 && part is not ("." or "..")
+            && !part.EndsWith('.') && !part.EndsWith(' ')
+            && !part.Any(character => character < 32 || "<>:\"\\|?*".Contains(character))
+            && !Regex.IsMatch(part.Split('.')[0], "^(CON|PRN|AUX|NUL|COM[0-9]|LPT[0-9])$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant));
 
     private async Task<JsonDocument> GetReleaseAsync(string owner, string repo, string tag, CancellationToken token)
     {
@@ -309,7 +325,8 @@ public sealed class PluginReleaseService(IHttpClientFactory clients, PluginCatal
 
     private static bool SafeId(string value)
         => !string.IsNullOrEmpty(value) && value.Length <= 64
-            && Regex.IsMatch(value, "^[a-z0-9][a-z0-9._-]*$", RegexOptions.CultureInvariant);
+            && Regex.IsMatch(value, "^[a-z0-9][a-z0-9._-]*$", RegexOptions.CultureInvariant)
+            && SafeArchivePath(value);
     private static bool SameRepository(string leftOwner, string leftRepo, string rightOwner, string rightRepo)
         => leftOwner.Equals(rightOwner, StringComparison.OrdinalIgnoreCase)
             && leftRepo.Equals(rightRepo, StringComparison.OrdinalIgnoreCase);

@@ -1,4 +1,6 @@
 using Router.Host.Plugins;
+using Microsoft.AspNetCore.Http.Features;
+using Microsoft.AspNetCore.Mvc;
 
 namespace Router.Host.Api;
 
@@ -6,6 +8,8 @@ public static class PluginReleaseEndpoints
 {
     public static void Map(WebApplication app)
     {
+        app.MapPost("/api/admin/plugins/upload", UploadAsync)
+            .WithMetadata(new RequestSizeLimitAttribute(PluginReleaseService.MaxArchiveBytes + 1024 * 1024));
         app.MapGet("/api/admin/plugin-repositories", async (PluginReleaseService service, CancellationToken token)
             => await Execute(() => service.RepositoriesAsync(token)));
         app.MapPost("/api/admin/plugin-repositories", async (RepositoryRequest request, PluginReleaseService service, CancellationToken token)
@@ -39,6 +43,33 @@ public static class PluginReleaseEndpoints
                 catch (InvalidOperationException exception)
                 { return Results.Conflict(new { error = exception.Message }); }
             });
+    }
+
+    internal static async Task<IResult> UploadAsync(HttpRequest request, PluginReleaseService service, CancellationToken token)
+    {
+        const long maxRequestBytes = PluginReleaseService.MaxArchiveBytes + 1024 * 1024;
+        if (request.ContentLength > maxRequestBytes)
+            return Results.Json(new { error = "Plugin ZIP must not exceed 100 MiB." }, statusCode: 413);
+        var limit = request.HttpContext.Features.Get<IHttpMaxRequestBodySizeFeature>();
+        if (limit is { IsReadOnly: false }) limit.MaxRequestBodySize = maxRequestBytes;
+        if (!request.HasFormContentType || !request.ContentType!.StartsWith("multipart/form-data", StringComparison.OrdinalIgnoreCase))
+            return Results.BadRequest(new { error = "Upload one ZIP using multipart/form-data field 'file'." });
+        return await Execute(async () =>
+        {
+            var form = await request.ReadFormAsync(new FormOptions
+            {
+                MultipartBodyLengthLimit = PluginReleaseService.MaxArchiveBytes,
+                ValueCountLimit = 4
+            }, token);
+            if (form.Files.Count != 1 || form.Files[0].Name != "file")
+                throw new ArgumentException("Upload exactly one plugin ZIP in field 'file'.");
+            var file = form.Files[0];
+            if (!file.FileName.EndsWith(".zip", StringComparison.OrdinalIgnoreCase) || file.Length <= 0
+                || file.Length > PluginReleaseService.MaxArchiveBytes)
+                throw new ArgumentException("Select a non-empty ZIP no larger than 100 MiB.");
+            await using var input = file.OpenReadStream();
+            return await service.UploadAsync(input, token);
+        });
     }
 
     private static async Task<IResult> Execute<T>(Func<Task<T>> action)
