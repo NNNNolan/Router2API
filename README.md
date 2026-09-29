@@ -81,6 +81,24 @@ plugins/
 
 不要复制源码、node_modules、账号数据或多个插件混合的 bin 目录。初次安装复制新目录；升级先备份完整旧包，再安排维护窗口替换/重载。失败重载是否保留旧版本需检查实际状态和日志，不能只看 HTTP 200。
 
+### 上传本地插件 ZIP
+
+插件管理页点击「上传插件 ZIP」，选择文件后点击「上传、覆盖并加载」。支持 C# 和 JS 的两种单插件包结构：
+
+```text
+任意名称.zip                  任意名称.zip
+└─ 任意顶层目录/              ├─ plugin.json（JS 必需）
+   ├─ plugin.json            ├─ *.dll / server/plugin.mjs
+   └─ *.dll / server/...     └─ 其他插件文件
+```
+
+插件 ID 取自 JS 清单或 C# 程序集的 `PlatformAdapter.PluginKey`，不依赖 ZIP 文件名；C# 可不带 `plugin.json`，允许附带依赖 DLL。每包只能包含一个插件。
+同 ID 包会**完整替换**（不会保留旧包残余文件），并且只重新加载该插件；原来禁用的插件也会启用。不触碰账号数据库或其他插件。校验/加载失败会恢复旧文件和旧状态；插件自身启动过程中对外部系统产生的副作用不能回滚。
+本地覆盖订阅插件后会解除该插件的发行版关联，仓库订阅保留。如需恢复仓库更新，请从订阅仓库重新安装。
+
+上传上限 100 MiB，解压上限 300 MiB、2000 个条目；拒绝路径穿越、链接和重复路径。管理接口为 `POST /api/admin/plugins/upload`，使用 multipart `file` 字段，沿用管理员会话、Origin 和 CSRF 校验。反向代理的请求体大小限制也需允许所上传的文件。
+**上传即允许执行插件代码，只安装可信来源的插件。** 上传验证不等于安全沙箱。
+
 插件管理页现可添加公开 GitHub 仓库（例如 `NNNNolan/Rouer-Plugins-js` 或 `NNNNolan/Rouer-Plugins-Csharp`），选择 Release 版本和其中的部分插件下载安装；“插件更新”页签可逐项选择要更新的已订阅插件。订阅记录保存于运行目录的 `plugins/.subscription/subscriptions.json`，不进数据库。插件卡片展示简介、运行状态，并提供启用、禁用和删除操作。发行索引格式见 [插件发行索引](sdk/PLUGIN-RELEASES.md)。手工安装方式仍可用于没有发行索引的插件；C# 手工包的描述优先读取包内 `plugin.json`，再读取 DLL 的程序集描述，最后尝试入口类型的 XML 文档摘要。JS 手工包读取 `plugin.json` 的 `description`。
 
 禁用插件后，对应的桌面和移动端导航菜单同步隐藏，重新启用并加载成功后恢复；没有主页面的插件不生成菜单，仍可从“插件管理”中启用或禁用。
@@ -226,7 +244,19 @@ docker logs --tail=100 router2api
 - 宿主镜像更新**不会自动更新已安装插件**。插件版本需在“插件管理 → 插件更新”中单独更新，并确认与宿主兼容。
 - Watchtower 只更新容器当前使用的镜像标签，不会把固定版本自动切换到其他版本。若要更换固定版本，需修改 Compose 的 `image` 后更新，或按[启动宿主命令](#直接使用-docker-run)用目标已发布版本重建容器，沿用原配置和挂载。
 
+## 代理订阅刷新周期
+
+管理后台「代理」中的订阅刷新周期支持正整数加单位：`30S`（秒）、`30M`（分钟）、`2H`（小时），单位不区分大小写，最小 `1S`，默认 `1H`。
+宿主每秒检查到期订阅，刷新串行执行；网络请求、排队和节点测速可能使实际刷新晚于设置周期，不保证精确定时。失败后自动刷新至少退避 1 分钟，仍可手动刷新。
+升级启动时会新增秒数字段并将旧分钟值乘以 60，不改变已有订阅周期；旧分钟字段和 Contracts 属性保留兼容，读取秒级周期时向上取整，新前端使用 `refreshIntervalSeconds`。
+
+## 测试窗口响应
+
+测试窗口展示所选 `/v1` 接口的完整响应正文，包括非 2xx 错误、纯文本和空正文；不提取回答、不渲染 Markdown。合法 JSON 使用两空格缩进，并将 `\u` 转义的中文显示为文字，保留数字原文及字段顺序；非 JSON 保持原样。HTTP 状态码和耗时单独展示，HTML 作为文本显示，不执行。这里展示的是宿主 API 返回内容，不是绕过宿主协议转换后的上游原始数据。
+
 ## 验证
+
+宿主 GitHub Release 使用中文结构化说明：更新重点、提交记录、版本镜像和升级提醒。发布前可在 `release-notes/<tag>.md` 编写本次更新重点，未提供时自动列出提交摘要，详见 [发布说明约定](release-notes/README.md)。
 
 ```powershell
 dotnet test tests/Router.Tests/Router.Tests.csproj --disable-build-servers -m:1 -p:ConcurrentBuild=false -p:UseSharedCompilation=false --logger 'console;verbosity=minimal'

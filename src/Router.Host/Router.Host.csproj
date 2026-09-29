@@ -2,7 +2,7 @@
   <PropertyGroup>
     <RootNamespace>Router.Host</RootNamespace>
     <AssemblyName>Router.Host</AssemblyName>
-    <Version>2.0.3</Version>
+    <Version>2.0.4</Version>
     <!-- 发布时仅覆盖宿主版本，不改变 Contracts 或其他项目的程序集版本。 -->
     <Version Condition="'$(HostVersion)' != ''">$(HostVersion)</Version>
     <UserSecretsId>Router2API-Public</UserSecretsId>
