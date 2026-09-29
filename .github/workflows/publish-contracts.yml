@@ -6,8 +6,8 @@ on:
       - 'v*'
   workflow_dispatch:
     inputs:
-      version:
-        description: 'NuGet package version (for example 2.0.0)'
+      release_tag:
+        description: 'Source release tag (for example v2.0.0)'
         required: true
         type: string
       nuget_user:
@@ -34,15 +34,13 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
-      - name: Compare Contracts DLL content
+      - name: Check Contracts package version
         id: changes
         shell: pwsh
         env:
-          MANUAL_VERSION: ${{ inputs.version }}
-          RELEASE_REF: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/v{0}', inputs.version) || github.ref }}
+          RELEASE_REF: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', inputs.release_tag) || github.ref }}
         run: |
-          $version = if ($env:MANUAL_VERSION) { $env:MANUAL_VERSION } else { $env:GITHUB_REF_NAME.Substring(1) }
-          ./.github/scripts/compare-contracts.ps1 -Version $version -Revision $env:RELEASE_REF
+          ./.github/scripts/compare-contracts.ps1 -Revision $env:RELEASE_REF
       - name: Check out release source
         if: steps.changes.outputs.changed == 'true'
         uses: actions/checkout@v4
