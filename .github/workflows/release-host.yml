@@ -114,6 +114,20 @@ jobs:
                 { encoding: 'utf8' },
               ).trim()
             } catch {}
+            const readContractsVersion = (revision) => {
+              const project = execFileSync(
+                'git',
+                ['show', `${revision}:src/Router.Contracts/Router.Contracts.csproj`],
+                { encoding: 'utf8' },
+              )
+              const version = project.match(/<Version>\s*([^<]+?)\s*<\/Version>/)?.[1]?.trim()
+              if (!version) {
+                throw new Error(`无法从 ${revision} 读取 Router.Contracts.csproj 的 <Version>。`)
+              }
+              return version
+            }
+            const currentContractsVersion = readContractsVersion(sha)
+            const previousContractsVersion = previousTag ? readContractsVersion(previousTag) : null
             const commits = execFileSync(
               'git',
               ['log', '--no-merges', '--format=%H%x09%s', previousTag ? `${previousTag}..${sha}` : sha],
@@ -181,10 +195,21 @@ jobs:
               throw new Error('Release 正文缺少“## Docker 镜像”区块，已停止覆盖正文。')
             }
 
+            const contractsChange = previousContractsVersion === null
+              ? '首次发布，无上一版本可比较。'
+              : previousContractsVersion === currentContractsVersion
+                ? `未更新，继续使用 \`${currentContractsVersion}\`。`
+                : `已更新：\`${previousContractsVersion}\` → \`${currentContractsVersion}\`。`
             const body = [
               '## 更新内容',
               '',
               changeSections,
+              '',
+              '## Contracts 版本',
+              '',
+              '- C# 插件依赖：`Router.Contracts` NuGet 包。',
+              `- 本次是否更新：${contractsChange}`,
+              `- 当前采用版本：\`${currentContractsVersion}\`。`,
               '',
               existingBody.slice(dockerSection).trim(),
             ].join('\n')
