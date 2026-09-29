@@ -1,0 +1,142 @@
+name-template: "Router2API v$RESOLVED_VERSION"
+tag-template: "v$RESOLVED_VERSION"
+tag-prefix: "v"
+
+category-template: "### $TITLE"
+categories:
+  - title: "🚨 重大变更 | Breaking Changes"
+    exclusive: true
+    when:
+      conventional:
+        breaking: true
+
+  - title: "🚀 Features | 新特性"
+    exclusive: true
+    when:
+      - conventional:
+          types:
+            - feat
+      - labels:
+          - feature
+          - enhancement
+          - feat
+
+  - title: "🐛 Bug Fixes | 修复"
+    exclusive: true
+    when:
+      - conventional:
+          types:
+            - fix
+      - labels:
+          - bug
+          - bugfix
+          - fix
+
+  - title: "⚡ Performance & UX | 性能与体验优化"
+    exclusive: true
+    when:
+      - conventional:
+          types:
+            - perf
+      - labels:
+          - performance
+          - perf
+
+  - title: "♻️ Refactoring | 代码重构"
+    exclusive: true
+    when:
+      - conventional:
+          types:
+            - refactor
+      - labels:
+          - refactor
+
+  - title: "📝 Documentation | 文档更新"
+    exclusive: true
+    when:
+      - conventional:
+          types:
+            - docs
+      - labels:
+          - docs
+          - documentation
+
+  - title: "⏪ Reverts | 代码回滚"
+    exclusive: true
+    when:
+      - conventional:
+          types:
+            - revert
+      - labels:
+          - revert
+
+  - title: "🧰 Maintenance & CI | 内部维护与构建"
+    exclusive: true
+    when:
+      - conventional:
+          types:
+            - build
+            - chore
+            - ci
+            - style
+            - test
+      - labels:
+          - build
+          - chore
+          - ci
+          - dependencies
+          - maintenance
+          - style
+          - test
+
+  - title: "📦 其他更新"
+
+  # --- 系统级拦截与版本号解析规则 ---
+  - type: pre-exclude
+    when:
+      label: skip-changelog
+
+  - type: version-resolver
+    semver-increment: major
+    when:
+      - conventional:
+          breaking: true
+      - labels:
+          - breaking
+          - major
+
+  - type: version-resolver
+    semver-increment: minor
+    when:
+      - conventional:
+          types:
+            - feat
+      - labels:
+          - feature
+          - enhancement
+          - feat
+
+  - type: version-resolver
+    semver-increment: patch
+
+change-template: "- $TITLE ([#$NUMBER]($URL))"
+change-title-escapes: '\<*_&'
+no-changes-template: "- 暂无可列出的合并 PR。"
+sort-by: merged_at
+sort-direction: descending
+
+template: |
+  ## 更新内容
+
+  $CHANGES
+
+  ## Docker 镜像
+
+  - 镜像仓库：`hhhhzy/router2api`，镜像标签与本次 Release 版本一致。
+  - 支持平台：`linux/amd64`、`linux/arm64`。
+
+  ## 升级说明
+
+  - Docker Compose 部署可执行 `docker compose pull && docker compose up -d` 更新宿主。
+  - 更新前请备份配置和持久化数据。
+  - 宿主镜像不会自动更新已安装插件，请在管理后台单独检查插件版本及兼容性。

@@ -256,7 +256,7 @@ docker logs --tail=100 router2api
 
 ## 验证
 
-宿主 GitHub Release 使用中文结构化说明：更新重点、提交记录、版本镜像和升级提醒。发布前可在 `release-notes/<tag>.md` 编写本次更新重点，未提供时自动列出提交摘要，详见 [发布说明约定](release-notes/README.md)。
+宿主 GitHub Release 由 Release Drafter 按合并 PR 的 Conventional Commit 类型归类，合并到 `main` 后自动更新发布草稿；推送 `v*` 标签并完成镜像构建后，release job 会发布该说明。说明包含新增功能、问题修复、性能与体验优化、维护文档、Docker 镜像平台和升级提示。PR 标题建议使用 `feat:`、`fix:`、`perf:`、`docs:` 等标准类型；分类及说明模板见 [Release Drafter 配置](.github/release-drafter.yml)。
 
 ```powershell
 dotnet test tests/Router.Tests/Router.Tests.csproj --disable-build-servers -m:1 -p:ConcurrentBuild=false -p:UseSharedCompilation=false --logger 'console;verbosity=minimal'
