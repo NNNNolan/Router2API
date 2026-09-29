@@ -30,6 +30,7 @@ public sealed class DatabaseInitializer(SqlSugarDatabase database, ILogger<Datab
         EnsureColumn("accounts", "LastStatusCode", "INTEGER NULL");
         EnsureColumn("accounts", "ConsecutiveFailures", "INTEGER NOT NULL DEFAULT 0");
         EnsureColumn("proxy_subscriptions", "RefreshIntervalMinutes", "INTEGER NOT NULL DEFAULT 60");
+        EnsureColumn("proxy_subscriptions", "RefreshIntervalSeconds", "BIGINT NULL");
         EnsureColumn("proxy_endpoints", "LatencyMs", "INTEGER NOT NULL DEFAULT 0");
         EnsureColumn("proxy_endpoints", "AverageLatencyMs", "INTEGER NOT NULL DEFAULT 0");
         EnsureColumn("proxy_endpoints", "AverageSpeedBytesPerSecond", "REAL NOT NULL DEFAULT 0");
@@ -49,6 +50,8 @@ public sealed class DatabaseInitializer(SqlSugarDatabase database, ILogger<Datab
 
         db.Ado.ExecuteCommand(
             "UPDATE proxy_subscriptions SET RefreshIntervalMinutes = 60 WHERE RefreshIntervalMinutes IS NULL OR RefreshIntervalMinutes <= 0");
+        db.Ado.ExecuteCommand(
+            "UPDATE proxy_subscriptions SET RefreshIntervalSeconds = CAST(RefreshIntervalMinutes AS BIGINT) * 60 WHERE RefreshIntervalSeconds IS NULL OR RefreshIntervalSeconds <= 0");
         db.Ado.ExecuteCommand(
             "UPDATE accounts SET PluginKey = Platform WHERE PluginKey IS NULL OR PluginKey = ''");
         logger.LogInformation("sqlite database initialized with host resource schema");

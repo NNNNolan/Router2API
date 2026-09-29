@@ -104,8 +104,14 @@ public sealed class ProxySubscription
     public bool Enabled { get; set; } = true;
     /// <summary>获取或设置公开成员 ParserName。</summary>
     public string? ParserName { get; set; }
-    /// <summary>获取或设置公开成员 RefreshIntervalMinutes。</summary>
-    public int RefreshIntervalMinutes { get; set; } = 60;
+    /// <summary>兼容旧插件的分钟属性；读取时向上取整，设置时换算为秒。</summary>
+    public int RefreshIntervalMinutes
+    {
+        get => checked((int)((RefreshIntervalSeconds + 59) / 60));
+        set => RefreshIntervalSeconds = (long)value * 60;
+    }
+    /// <summary>刷新周期（秒），默认 1 小时；保存时须为正整数。</summary>
+    public long RefreshIntervalSeconds { get; set; } = 3600;
     /// <summary>获取或设置公开成员 LastFetchedAt。</summary>
     public DateTimeOffset? LastFetchedAt { get; set; }
     /// <summary>获取或设置公开成员 LastFetchedCount。</summary>

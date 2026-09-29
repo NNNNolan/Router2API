@@ -414,7 +414,7 @@ public static class ApiEndpoints
         CancellationToken cancellationToken)
         => Results.Ok((await subscriptions.ListAsync(cancellationToken)).Select(ToSubscriptionDto));
 
-    private static async Task<IResult> SaveSubscriptionAsync(
+    internal static async Task<IResult> SaveSubscriptionAsync(
         ProxySubscriptionRequest request,
         IProxySubscriptionService subscriptions,
         IProxySubscriptionRefreshQueue refreshQueue,
@@ -424,8 +424,8 @@ public static class ApiEndpoints
             || !Uri.TryCreate(request.Url, UriKind.Absolute, out var url)
             || url.Scheme is not ("http" or "https"))
             return Results.BadRequest(new { error = "subscription name and an http(s) url are required" });
-        if (!TryParseRefreshInterval(request.RefreshInterval, out var refreshIntervalMinutes))
-            return Results.BadRequest(new { error = "refresh interval must use a positive number followed by H or M, for example 2H or 30M" });
+        if (!TryParseRefreshInterval(request.RefreshInterval, out var refreshIntervalSeconds))
+            return Results.BadRequest(new { error = "refresh interval must use a positive integer followed by H, M or S, for example 2H, 30M or 30S (maximum 2147483647 minutes)" });
 
         var subscription = new ProxySubscription
         {
@@ -433,7 +433,7 @@ public static class ApiEndpoints
             Name = request.Name.Trim(),
             Url = request.Url.Trim(),
             Scheme = ParseProxyScheme(request.Scheme),
-            RefreshIntervalMinutes = refreshIntervalMinutes
+            RefreshIntervalSeconds = refreshIntervalSeconds
         };
         var saved = await subscriptions.SaveAsync(subscription, cancellationToken);
         refreshQueue.Enqueue(saved.Id);
@@ -967,6 +967,7 @@ public static class ApiEndpoints
             enabled = subscription.Enabled,
             parserName = subscription.ParserName,
             refreshIntervalMinutes = subscription.RefreshIntervalMinutes,
+            refreshIntervalSeconds = subscription.RefreshIntervalSeconds,
             lastRefreshAt = subscription.LastFetchedAt,
             endpointCount = subscription.LastFetchedCount,
             lastError = subscription.LastError
@@ -1217,9 +1218,9 @@ public static class ApiEndpoints
         catch (InvalidTimeZoneException) { return null; }
     }
 
-    private static bool TryParseRefreshInterval(string? value, out int minutes)
+    internal static bool TryParseRefreshInterval(string? value, out long seconds)
     {
-        minutes = 60;
+        seconds = 3600;
         if (string.IsNullOrWhiteSpace(value)) return true;
 
         var normalized = value.Trim();
@@ -1227,22 +1228,25 @@ public static class ApiEndpoints
 
         var unit = char.ToUpperInvariant(normalized[^1]);
         var amountText = normalized[..^1];
-        if (unit is not ('H' or 'M')
+        if (unit is not ('H' or 'M' or 'S')
             || amountText.Length == 0
             || amountText[0] == '0'
             || amountText.Any(character => character is < '0' or > '9')
-            || !int.TryParse(amountText, out var amount)
+            || !long.TryParse(amountText, out var amount)
             || amount <= 0)
             return false;
 
         try
         {
-            minutes = unit == 'H' ? checked(amount * 60) : amount;
+            var multiplier = unit switch { 'H' => 3600, 'M' => 60, _ => 1 };
+            var parsed = checked(amount * multiplier);
+            if (parsed > (long)int.MaxValue * 60) return false;
+            seconds = parsed;
             return true;
         }
         catch (OverflowException)
         {
-            minutes = 60;
+            seconds = 3600;
             return false;
         }
     }

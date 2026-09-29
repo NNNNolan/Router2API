@@ -18,6 +18,7 @@ public sealed class ProxySubscriptionRefreshHostedService(
 {
     private readonly Channel<string> _refreshQueue = Channel.CreateUnbounded<string>();
     private readonly ConcurrentDictionary<string, byte> _queued = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, DateTimeOffset> _retryAfter = new(StringComparer.OrdinalIgnoreCase);
     private readonly SemaphoreSlim _refreshGate = new(1, 1);
 
     public void Enqueue(string subscriptionId)
@@ -37,7 +38,7 @@ public sealed class ProxySubscriptionRefreshHostedService(
 
     private async Task RefreshDueLoopAsync(CancellationToken cancellationToken)
     {
-        using var timer = new PeriodicTimer(TimeSpan.FromMinutes(1));
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
         try
         {
             await RefreshDueAsync(cancellationToken);
@@ -66,7 +67,7 @@ public sealed class ProxySubscriptionRefreshHostedService(
         }
     }
 
-    private async Task RefreshDueAsync(CancellationToken cancellationToken)
+    internal async Task RefreshDueAsync(CancellationToken cancellationToken)
     {
         IReadOnlyList<ProxySubscription> values;
         try
@@ -84,27 +85,31 @@ public sealed class ProxySubscriptionRefreshHostedService(
         }
 
         var now = DateTimeOffset.UtcNow;
+        foreach (var entry in _retryAfter.Where(entry => entry.Value <= now))
+            _retryAfter.TryRemove(entry.Key, out _);
         foreach (var subscription in values.Where(value =>
                      value.Enabled
-                     && value.RefreshIntervalMinutes > 0
+                     && value.RefreshIntervalSeconds > 0
+                     && (!_retryAfter.TryGetValue(value.Id, out var retryAfter) || retryAfter <= now)
                      && (value.LastFetchedAt is null
-                         || value.LastFetchedAt.Value.AddMinutes(value.RefreshIntervalMinutes) <= now)))
-            await RefreshOneAsync(subscription.Id, cancellationToken, subscription.RefreshIntervalMinutes);
+                         || now - value.LastFetchedAt.Value >= TimeSpan.FromSeconds(value.RefreshIntervalSeconds))))
+            await RefreshOneAsync(subscription.Id, cancellationToken, subscription.RefreshIntervalSeconds);
     }
 
     private async Task RefreshOneAsync(
         string subscriptionId,
         CancellationToken cancellationToken,
-        int? intervalMinutes = null)
+        long? intervalSeconds = null)
     {
         await _refreshGate.WaitAsync(cancellationToken);
         try
         {
             await subscriptions.RefreshAsync(subscriptionId, cancellationToken);
+            _retryAfter.TryRemove(subscriptionId, out _);
             logger.LogDebug(
-                "proxy subscription refreshed id={SubscriptionId} intervalMinutes={IntervalMinutes}",
+                "proxy subscription refreshed id={SubscriptionId} intervalSeconds={IntervalSeconds}",
                 subscriptionId,
-                intervalMinutes);
+                intervalSeconds);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -112,6 +117,8 @@ public sealed class ProxySubscriptionRefreshHostedService(
         }
         catch (Exception exception)
         {
+            // 秒级扫描不能让失败订阅每秒重试；保留至少一分钟的失败退避，手动刷新不受限。
+            _retryAfter[subscriptionId] = DateTimeOffset.UtcNow.AddMinutes(1);
             logger.LogWarning(
                 exception,
                 "proxy subscription refresh failed id={SubscriptionId}",

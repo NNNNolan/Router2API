@@ -36,6 +36,8 @@ public sealed class ProxySubscriptionService(
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(subscription);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(subscription.RefreshIntervalSeconds);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(subscription.RefreshIntervalSeconds, (long)int.MaxValue * 60);
         cancellationToken.ThrowIfCancellationRequested();
         using var db = database.CreateClient();
         var entity = subscription.ToEntity();

@@ -85,6 +85,9 @@ public sealed class ProxySubscriptionEntity
     public int RefreshIntervalMinutes { get; set; } = 60;
 
     [SugarColumn(IsNullable = true)]
+    public long? RefreshIntervalSeconds { get; set; }
+
+    [SugarColumn(IsNullable = true)]
     public DateTime? LastFetchedAtUtc { get; set; }
     public int LastFetchedCount { get; set; }
 

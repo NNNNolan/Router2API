@@ -62,6 +62,7 @@ export interface ProxySubscription {
   scheme: string
   enabled: boolean
   refreshIntervalMinutes: number
+  refreshIntervalSeconds: number
   lastRefreshAt: string | null
   endpointCount: number
   lastError?: string | null
@@ -156,7 +157,7 @@ function normalizeProxy(value: unknown): ProxyEndpoint {
 
 function normalizeSubscription(value: unknown): ProxySubscription {
   const raw = asObject(value)
-  return { id: asString(pick(raw, 'id')) ?? '', name: asString(pick(raw, 'name')) ?? '', url: asString(pick(raw, 'url')) ?? '', scheme: asString(pick(raw, 'scheme')) ?? 'http', enabled: asBoolean(pick(raw, 'enabled')) ?? true, refreshIntervalMinutes: asNumber(pick(raw, 'refreshIntervalMinutes')) ?? 60, lastRefreshAt: asString(pick(raw, 'lastRefreshAt', 'lastFetchedAt')), endpointCount: asNumber(pick(raw, 'endpointCount', 'lastFetchedCount')) ?? 0, lastError: asString(pick(raw, 'lastError')) }
+  return { id: asString(pick(raw, 'id')) ?? '', name: asString(pick(raw, 'name')) ?? '', url: asString(pick(raw, 'url')) ?? '', scheme: asString(pick(raw, 'scheme')) ?? 'http', enabled: asBoolean(pick(raw, 'enabled')) ?? true, refreshIntervalMinutes: asNumber(pick(raw, 'refreshIntervalMinutes')) ?? 60, refreshIntervalSeconds: asNumber(pick(raw, 'refreshIntervalSeconds')) ?? (asNumber(pick(raw, 'refreshIntervalMinutes')) ?? 60) * 60, lastRefreshAt: asString(pick(raw, 'lastRefreshAt', 'lastFetchedAt')), endpointCount: asNumber(pick(raw, 'endpointCount', 'lastFetchedCount')) ?? 0, lastError: asString(pick(raw, 'lastError')) }
 }
 
 function normalizePlugin(value: unknown): PluginDescriptor {

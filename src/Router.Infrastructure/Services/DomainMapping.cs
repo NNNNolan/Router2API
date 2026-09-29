@@ -148,9 +148,9 @@ internal static class DomainMapping
                 : ProxyScheme.Http,
             Enabled = entity.Enabled,
             ParserName = entity.ParserName,
-            RefreshIntervalMinutes = entity.RefreshIntervalMinutes > 0
-                ? entity.RefreshIntervalMinutes
-                : 60,
+            RefreshIntervalSeconds = entity.RefreshIntervalSeconds is > 0
+                ? entity.RefreshIntervalSeconds.Value
+                : (long)(entity.RefreshIntervalMinutes > 0 ? entity.RefreshIntervalMinutes : 60) * 60,
             LastFetchedAt = entity.LastFetchedAtUtc.HasValue
                 ? new DateTimeOffset(entity.LastFetchedAtUtc.Value, TimeSpan.Zero)
                 : null,
@@ -168,6 +168,7 @@ internal static class DomainMapping
             Enabled = subscription.Enabled,
             ParserName = subscription.ParserName,
             RefreshIntervalMinutes = subscription.RefreshIntervalMinutes,
+            RefreshIntervalSeconds = subscription.RefreshIntervalSeconds,
             LastFetchedAtUtc = subscription.LastFetchedAt?.UtcDateTime,
             LastFetchedCount = subscription.LastFetchedCount,
             LastError = subscription.LastError
