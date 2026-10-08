@@ -137,10 +137,12 @@ flowchart TD
 | 路线 | 谁选择资源 | 回收时点 | 默认重试 |
 | --- | --- | --- | --- |
 | `attempt` | 当前模型尝试的原生 client，代理按需绑定 | 跟随响应/尝试 lifetime | 内部不自动 HTTP 重放 |
-| `pool` | 独立工厂从启用订阅/可用节点中选择，不看账号 | 缓冲结束或 source/response 释放 | 默认无；显式传输重试另有预算 |
+| `pool` | 独立工厂从启用订阅及手动节点中的可用节点选择，不看账号 | 缓冲结束或 source/response 释放 | 默认无；显式传输重试另有预算 |
 | `direct` | 明确直连，不触碰代理池 | 缓冲结束或 source/response 释放 | 无 |
 
 `attempt` 延续宿主原有代理/直连选择，可能直连；它不等于 `pool` 的无节点失败保证。显式 `allowDirectFallback` 只在对应路由/权限允许时生效。
+
+独立代理池的 `SubscriptionIds`（JS 为 `subscriptionIds`）为空或空列表时包含启用订阅及手动节点；指定 `["manual"]` 只选手动节点，指定其他订阅时不混入手动节点，也可同时指定两者。禁用订阅、未知来源、不可用节点仍被排除；手动节点不需要创建同名订阅。
 
 底层共享 `ProxyTransportFactory` 的版本化连接池，key 反映实际连接设置和 redirect profile，不靠任意 client name 隐藏配置。所有路径禁用共享 Cookie，调用方若需 Cookie 必须自己明确处理。
 

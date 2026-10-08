@@ -30,6 +30,62 @@ public sealed class ProxyPoolHttpClientFactoryTests : IDisposable
     }
 
     [TestMethod]
+    [DataRow("default", false)]
+    [DataRow("empty", false)]
+    [DataRow("manual", false)]
+    [DataRow("MANUAL", false)]
+    [DataRow("mixed", false)]
+    [DataRow("default", true)]
+    [DataRow("manual", true)]
+    public async Task ManualNodeWorksWithoutASubscription(string scope, bool fixedClient)
+    {
+        await using var server = new TestServer("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok");
+        var pool = CreatePool([Node(server.Port, subscription: "manual")]);
+        var options = new ProxyPoolHttpClientOptions
+        {
+            SubscriptionIds = scope switch
+            {
+                "default" => null,
+                "empty" => [],
+                "mixed" => ["enabled", "manual"],
+                _ => [scope]
+            }
+        };
+        using var client = fixedClient ? await pool.CreateClientAsync(options) : null;
+        using var response = client is not null
+            ? await client.GetAsync("http://upstream.invalid/check")
+            : await pool.SendAsync(
+                () => new HttpRequestMessage(HttpMethod.Get, "http://upstream.invalid/check"), options);
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await response.Content.ReadAsStringAsync()).Should().Be("ok");
+        (await server.Requests).Single().Should().StartWith("GET http://upstream.invalid/check");
+    }
+
+    [TestMethod]
+    [DataRow("manual", "enabled", ResourceState.Active, false)]
+    [DataRow("enabled", "manual", ResourceState.Active, false)]
+    [DataRow("manual", null, ResourceState.Disabled, false)]
+    [DataRow("manual", "manual", ResourceState.Active, true)]
+    [DataRow("disabled", null, ResourceState.Active, false)]
+    [DataRow("disabled", "disabled", ResourceState.Active, false)]
+    [DataRow("unknown", null, ResourceState.Active, false)]
+    [DataRow("unknown", "unknown", ResourceState.Active, false)]
+    public async Task IneligibleNodesStillFailClosed(
+        string subscription, string? scope, ResourceState state, bool coolingDown)
+    {
+        var node = Node(UnusedPort(), subscription, state);
+        if (coolingDown) node.Status.CooldownUntil = DateTimeOffset.UtcNow.AddMinutes(5);
+        var pool = CreatePool([node]);
+        var act = () => pool.CreateClientAsync(new ProxyPoolHttpClientOptions
+        {
+            SubscriptionIds = scope is null ? null : [scope]
+        });
+
+        await act.Should().ThrowAsync<ProxyPoolUnavailableException>();
+    }
+
+    [TestMethod]
     public async Task FiltersSubscriptionsAndUnavailableNodes()
     {
         await using var server = new TestServer("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok");
@@ -233,7 +289,11 @@ public sealed class ProxyPoolHttpClientFactoryTests : IDisposable
     {
         var subscriptions = new Mock<IProxySubscriptionService>();
         subscriptions.Setup(store => store.ListAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new[] { new ProxySubscription { Id = "enabled" }, new ProxySubscription { Id = "other" } });
+            .ReturnsAsync(new[] {
+                new ProxySubscription { Id = "enabled" },
+                new ProxySubscription { Id = "other" },
+                new ProxySubscription { Id = "disabled", Enabled = false }
+            });
         return subscriptions.Object;
     }
 

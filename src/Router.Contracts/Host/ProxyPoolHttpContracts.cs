@@ -29,7 +29,7 @@ public interface IProxyPoolHttpClientFactory
 /// <summary>独立代理池客户端的传输选项，不包含账号或业务状态码策略。</summary>
 public sealed record ProxyPoolHttpClientOptions
 {
-    /// <summary>限定订阅 ID；空值或空列表表示所有启用订阅。</summary>
+    /// <summary>限定节点来源 ID；空值或空列表表示所有启用订阅及手动节点，"manual" 表示手动节点。指定其他订阅时不包含手动节点。</summary>
     public IReadOnlyList<string>? SubscriptionIds { get; init; }
     /// <summary>选不到代理时是否允许直连；默认拒绝直连。</summary>
     public bool AllowDirectFallback { get; init; }
@@ -52,4 +52,4 @@ public sealed record ProxyPoolRetryOptions
 
 /// <summary>代理池中没有满足选项的可用节点，且调用方未允许直连回退。</summary>
 public sealed class ProxyPoolUnavailableException()
-    : InvalidOperationException("No available proxy in the enabled subscriptions; direct fallback is disabled.");
+    : InvalidOperationException("No available proxy in the requested pool scope; direct fallback is disabled.");

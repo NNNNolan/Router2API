@@ -96,6 +96,9 @@ public sealed class ProxyPoolHttpClientFactory(
             .Where(subscription => subscription.Enabled && (allowed is not { Count: > 0 } || allowed.Contains(subscription.Id)))
             .Select(subscription => subscription.Id)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        // 手动节点没有订阅记录，但仍须遵守调用方指定的节点来源范围。
+        if (allowed is not { Count: > 0 } || allowed.Contains("manual"))
+            enabled.Add("manual");
         var now = DateTimeOffset.UtcNow;
         var candidates = (await _proxies.ListAsync(cancellationToken))
             .Where(proxy => enabled.Contains(proxy.SubscriptionId)
