@@ -35,7 +35,7 @@ internal sealed class JintPackageLoader(IPluginHostFactory hosts) : IPluginPacka
                     TimeSpan.FromSeconds(definition.ModelCacheTtlSeconds)));
                 endpoints.AddRange(selected.Endpoints.Select(endpoint => new PluginEndpointDefinition(manifest.Id, definition.Name,
                     endpoint.Method, PluginEndpointDefinition.NormalizeRoute(endpoint.Path), Enum.Parse<PluginAuthPolicy>(endpoint.Auth),
-                    context => terminal.InvokeEndpointAsync(endpoint.Handler, context))));
+                    context => terminal.InvokeEndpointAsync(endpoint.Handler, context, endpoint.Auth == nameof(PluginAuthPolicy.Anonymous)))));
             }
             var package = new LoadedPlugin(manifest.Id, manifest.Version, Runtime, platforms, endpoints,
                 created.Select(terminal => terminal.MainPage).FirstOrDefault(page => page is not null))

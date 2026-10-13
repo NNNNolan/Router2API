@@ -288,10 +288,12 @@ writer 的 finally 和 HTTP OnCompleted 提供回收兜底。未被枚举的流�
 1. 管理端获取缓存 HTML，注入 viewport 和 `window.Router2API` 包装，放进 `srcdoc` iframe。
 2. iframe 通过 postMessage 请求当前插件的相对路由；父页面检查 event.source、方法和路径。
 3. 父页面添加插件前缀、管理员 Cookie、必要 CSRF 头，再请求 `/api/plugins/<pluginKey>/<route>`。
-4. Catalog 匹配已绑定 endpoint，统一管理员认证/CSRF、1 MiB 请求体和 endpoint 时限，再创建 `PluginHttpContext`。
-5. Jint 端点返回 JSON/204，父页面把结果回传 iframe。
+4. Catalog 匹配已绑定 endpoint，默认管理员认证/CSRF，检查 1 MiB 请求体和 endpoint 时限，再创建 `PluginHttpContext`。
+5. Jint 端点返回 JSON/204，父页面把结果回传 iframe。C# 端点显式返回 `ContentType = "text/html; charset=utf-8"` 和字符串 Body 时，宿主按 UTF-8 HTML 原文写出，不套 JSON。
 
-页面不是可信的宿主服务对象，不把管理员 Cookie/token 注入源码。当前 `Anonymous/ApiKey` 等声明不会推翻 Catalog 对管理路由的管理员要求；`Internal` 不匹配外部路由。
+页面不是可信的宿主服务对象，不把管理员 Cookie/token 注入源码。宿主 2.0.5 起，仅显式 `Anonymous` 端点免管理员登录；其他策略（含 `ApiKey/Custom`）仍沿用管理员要求，`Internal` 不匹配外部路由。匿名写请求必须是 JSON，拒绝跨源 Origin 和浏览器跨站 Fetch Metadata；不使用管理员 Cookie/CSRF。插件需自行处理业务授权、限流、时效和重放保护，不能把管理接口简单标为匿名。
+
+公开 HTML 页面独立使用同源 `fetch`（`credentials: "omit"`），不是后台 iframe，不依赖 `window.Router2API`。宿主为匿名响应设置 no-store、no-referrer、nosniff，为 HTML 添加仅允许内联脚本/样式和同源连接、禁止嵌入的 CSP。Jint 匿名端点不能审批或撤销动态 HTTP origin。该支持不改变 Contracts 2.0 或 JS Host API 1；旧宿主不支持匿名 HTML 页面。
 
 ## 9. 默认预算速查
 

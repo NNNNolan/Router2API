@@ -39,9 +39,11 @@ dotnet build Router2API.slnx --disable-build-servers -m:1 -p:ConcurrentBuild=fal
 
 ### 宿主版本
 
-当前源码默认版本为 **2.0.3**，在 `src/Router.Host/Router.Host.csproj` 的 `Version` 中维护。管理后台通过需管理员会话的 `GET /api/admin/version` 读取实际运行的宿主版本，并显示在桌面侧栏和移动端菜单底部；前端不再写死版本号。
+当前源码默认版本为 **2.0.5**，在 `src/Router.Host/Router.Host.csproj` 的 `Version` 中维护。管理后台通过需管理员会话的 `GET /api/admin/version` 读取实际运行的宿主版本，并显示在桌面侧栏和移动端菜单底部；前端不再写死版本号。
 
-Docker Release 构建会将 tag 对应版本通过 `HOST_VERSION` 构建参数写入宿主。手动构建可用 `-p:HostVersion=2.0.3`，手动 Docker 构建可用 `--build-arg HOST_VERSION=2.0.3`；未指定时使用源码默认值。该版本独立于 Contracts 和插件版本，只有更换并启动新宿主后，页面才会显示新版本。
+Docker Release 构建会将 tag 对应版本通过 `HOST_VERSION` 构建参数写入宿主。手动构建可用 `-p:HostVersion=2.0.5`，手动 Docker 构建可用 `--build-arg HOST_VERSION=2.0.5`；未指定时使用源码默认值。该版本独立于 Contracts 和插件版本，只有更换并启动新宿主后，页面才会显示新版本。
+
+2.0.5 支持插件显式声明的 `Anonymous` 公开端点，以及 C# 插件的字符串 HTML 响应；现有管理端点仍要求管理员会话和 CSRF，不开放 `Internal`。匿名写请求限 JSON 并校验浏览器同源性，HTML 响应禁止缓存/嵌入。插件需自行提供限时业务授权和防滥用措施。更新宿主前请审查已安装插件的 `Anonymous` 声明：此前这些声明仍被管理认证拦截，新版将真正公开。该变化不升级 Contracts 2.0 或 JS Host API 1，已有插件无需重编；详见 [端点与页面边界](sdk/HOST-LIFECYCLE.md#8-管理页面与请求桥)。
 
 ### 第一次启动先设置新凭据
 

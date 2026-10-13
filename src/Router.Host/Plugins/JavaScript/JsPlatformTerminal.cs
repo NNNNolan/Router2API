@@ -224,12 +224,13 @@ internal sealed partial class JsPlatformTerminal : IPlatformTerminal, IPluginMod
         }
     }
 
-    internal async Task<PluginResult> InvokeEndpointAsync(string handler, PluginHttpContext context)
+    internal async Task<PluginResult> InvokeEndpointAsync(string handler, PluginHttpContext context, bool anonymous = false)
     {
         try
         {
             var result = await CallAsync(handler,
-                new JsCallContext(JsCallKind.Control, TimeSpan.FromSeconds(25), Endpoint: context, Token: context.CancellationToken), null);
+                new JsCallContext(JsCallKind.Control, TimeSpan.FromSeconds(25), Endpoint: context, Token: context.CancellationToken,
+                    AnonymousEndpoint: anonymous), null);
             var value = result?.Deserialize<PluginResult>(JsonOptions)
                 ?? throw new InvalidOperationException("JS endpoint must return a JSON result.");
             if (value.StatusCode is < 200 or > 599 || value.ContentType is not (null or "application/json"))

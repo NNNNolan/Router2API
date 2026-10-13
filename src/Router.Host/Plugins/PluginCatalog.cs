@@ -334,10 +334,19 @@ public sealed class PluginCatalog(
             && item.Method.Equals(context.Request.Method, StringComparison.OrdinalIgnoreCase));
         if (endpoint is null) return Results.NotFound();
 
-        if (!Authorize(PluginAuthPolicy.AdminSession, context))
+        // 只有显式 Anonymous 才公开；其他策略仍沿用原管理认证，不把旧 ApiKey/Custom 路由意外放开。
+        var anonymous = endpoint.Auth == PluginAuthPolicy.Anonymous;
+        if (!anonymous && !Authorize(PluginAuthPolicy.AdminSession, context))
             return Results.Json(new { error = "admin authentication required" }, statusCode: 401);
-        if (IsUnsafeMethod(context.Request.Method) && !HasValidCsrf(context))
+        if (IsUnsafeMethod(context.Request.Method)
+            && !(anonymous ? HasValidAnonymousRequest(context) : HasValidCsrf(context)))
             return Results.Json(new { error = "csrf validation failed" }, statusCode: 403);
+        if (anonymous)
+        {
+            context.Response.Headers.CacheControl = "no-store";
+            context.Response.Headers["Referrer-Policy"] = "no-referrer";
+            context.Response.Headers.XContentTypeOptions = "nosniff";
+        }
         if (context.Request.ContentLength > MaxPluginRequestBodyBytes)
             return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
 
@@ -377,6 +386,18 @@ public sealed class PluginCatalog(
                     DurationMs = (int)stopwatch.ElapsedMilliseconds,
                     DetailsJson = JsonSerializer.Serialize(new { method = context.Request.Method, route })
                 });
+                if (result.StatusCode != 204
+                    && string.Equals(result.ContentType?.Split(';', 2)[0].Trim(), "text/html", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (result.Body is not string html)
+                        return Results.Json(new { error = "HTML plugin responses require a string body" }, statusCode: 500);
+                    context.Response.Headers.CacheControl = "no-store";
+                    context.Response.Headers["Referrer-Policy"] = "no-referrer";
+                    context.Response.Headers.XContentTypeOptions = "nosniff";
+                    context.Response.Headers.ContentSecurityPolicy =
+                        "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+                    return Results.Content(html, "text/html; charset=utf-8", System.Text.Encoding.UTF8, result.StatusCode);
+                }
                 return result.StatusCode == 204
                     ? Results.NoContent()
                     : Results.Json(result.Body, statusCode: result.StatusCode, contentType: result.ContentType);
@@ -641,6 +662,17 @@ public sealed class PluginCatalog(
             && CryptographicOperations.FixedTimeEquals(
                 System.Text.Encoding.UTF8.GetBytes(cookie),
                 System.Text.Encoding.UTF8.GetBytes(header));
+    }
+
+    private static bool HasValidAnonymousRequest(HttpContext context)
+    {
+        // 匿名 JSON API 不借用管理员 Cookie/CSRF；阻止跨站表单和浏览器跨源调用。
+        if (!context.Request.HasJsonContentType()) return false;
+        var site = context.Request.Headers["Sec-Fetch-Site"].ToString();
+        if (site.Length > 0 && site is not ("same-origin" or "none")) return false;
+        var origin = context.Request.Headers.Origin.ToString();
+        return string.IsNullOrEmpty(origin)
+            || string.Equals(origin.TrimEnd('/'), $"{context.Request.Scheme}://{context.Request.Host}", StringComparison.OrdinalIgnoreCase);
     }
 
     private async Task<bool> DrainAndUnloadAsync(RuntimePlugin plugin, CancellationToken cancellationToken)

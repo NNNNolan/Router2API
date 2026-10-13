@@ -261,6 +261,9 @@ public sealed class JsCapabilityParityTests
               return ctx.reply.completion({model:"m",content:"unexpected"});
             }
             """, manifest);
+        // 相同端点以匿名入口调用时，不能获得管理员动态 origin 授权能力。
+        (await terminal.InvokeEndpointAsync("endpoint", new PluginHttpContext(), anonymous: true)).StatusCode.Should().Be(502);
+        (await fixture.Native.Http.GetApprovedOriginsAsync()).Should().NotContain("https://new.example");
         fixture.Send = (_, _) => Task.FromResult(Fixture.Json(new { approved = true }));
         (await fixture.Endpoint(terminal))["approved"]!.GetValue<bool>().Should().BeTrue();
         (await fixture.Native.Http.GetApprovedOriginsAsync()).Should().Contain("https://new.example");

@@ -70,7 +70,8 @@ internal sealed class JsHttpCapabilities(JsPluginManifest manifest, IPluginServi
                 return await host.Http.GetApprovedOriginsAsync(token);
             case "http.approveOrigin":
             case "http.revokeOrigin":
-                if (!manifest.Permissions.Http.ManageOrigins || invocation.Context.Kind != JsCallKind.Control || invocation.Context.Endpoint is null)
+                if (!manifest.Permissions.Http.ManageOrigins || invocation.Context.Kind != JsCallKind.Control
+                    || invocation.Context.Endpoint is null || invocation.Context.AnonymousEndpoint)
                     throw new UnauthorizedAccessException("Origins may only be approved in an authenticated plugin management endpoint.");
                 var origin = input["origin"]?.GetValue<string>() ?? throw new InvalidOperationException("An exact origin is required.");
                 if (operation == "http.approveOrigin") await host.Http.ApproveOriginAsync(origin, token);

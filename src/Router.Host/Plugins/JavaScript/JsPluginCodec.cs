@@ -223,4 +223,5 @@ internal enum JsCallKind { Terminal, Control, Task, Job, Selection, Callback, St
 internal sealed record JsCallContext(JsCallKind Kind, TimeSpan Timeout,
     PluginAttemptContext? Attempt = null, PluginHttpContext? Endpoint = null, string? TaskName = null, bool Starting = false,
     AdapterRequest? SelectionRequest = null, Account? CredentialAccount = null,
-    Router.Contracts.Plugins.PluginJobContext? Job = null, Credential? SecretCredential = null, CancellationToken Token = default);
+    Router.Contracts.Plugins.PluginJobContext? Job = null, Credential? SecretCredential = null,
+    bool AnonymousEndpoint = false, CancellationToken Token = default);
