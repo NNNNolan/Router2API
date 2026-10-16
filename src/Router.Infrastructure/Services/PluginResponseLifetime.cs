@@ -15,6 +15,8 @@ public sealed class PluginResponseLifetime : IAsyncDisposable
     private readonly bool _httpSuccess;
     private TaskCompletionSource? _disposal;
     private bool _writing;
+    private bool _writeCompleted;
+    private bool _rawCompleted;
     private bool _started;
     private bool _ended;
     private bool _cancelled;
@@ -87,11 +89,27 @@ public sealed class PluginResponseLifetime : IAsyncDisposable
         }
     }
 
-    /// <summary>记录写出器或源流失败；不把原始异常中的凭据写入流错误。</summary>
+    /// <summary>所有响应内容及最终协议标记均已成功写出。</summary>
+    public void CompleteWrite()
+    {
+        lock (_gate) _writeCompleted = true;
+    }
+
+    /// <summary>raw 透传已经把协议结束标记中继给客户端；此时上游 EOF 只是连接收尾。</summary>
+    public void CompleteRawRelay()
+    {
+        lock (_gate) _rawCompleted = true;
+    }
+
+    /// <summary>记录写出器或源流失败；已确认送完的响应不再因调用方断开而失败。</summary>
     public void Fail(bool cancelled, string message)
     {
-        _cancelled |= cancelled;
-        _error ??= message;
+        lock (_gate)
+        {
+            if (cancelled && (_writeCompleted || _rawCompleted || (!_writing && _ended))) return;
+            _cancelled |= cancelled;
+            _error ??= message;
+        }
     }
 
     private void Start()
@@ -217,8 +235,15 @@ public sealed class PluginResponseLifetime : IAsyncDisposable
                 Fail(false, "response resource cleanup failed");
             }
         }
-        var outcome = new PluginStreamCompletion(_httpSuccess && _ended && !_cancelled && _error is null,
-            _cancelled, _error ?? (!_ended ? "stream was not fully consumed" : null), _usage);
+        // raw 透传无法等到上游 EOF（调用方断开后读取会被取消），
+        // 但协议结束标记已中继就说明客户端拿到了完整响应。
+        PluginStreamCompletion outcome;
+        lock (_gate)
+        {
+            var delivered = _ended || _writeCompleted || _rawCompleted;
+            outcome = new PluginStreamCompletion(_httpSuccess && delivered && !_cancelled && _error is null,
+                _cancelled, _error ?? (delivered ? null : "stream was not fully consumed"), _usage);
+        }
         foreach (var callback in _completed)
         {
             try { await callback(outcome); }

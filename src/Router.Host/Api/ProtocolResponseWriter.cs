@@ -26,6 +26,7 @@ internal static class ProtocolResponseWriter
         {
             lifetime?.BeginWrite();
             await WriteCoreAsync(context, response, endpoint, model, cancellationToken, request);
+            lifetime?.CompleteWrite();
         }
         catch
         {
@@ -56,10 +57,14 @@ internal static class ProtocolResponseWriter
                 await context.Response.Body.WriteAsync(rawContent, cancellationToken);
             if (response.RawStream is { } rawStream)
             {
+                var scan = RawCompletionScan.For(endpoint);
+                var owner = response.Lifetime as PluginResponseLifetime;
                 await foreach (var chunk in rawStream.WithCancellation(cancellationToken))
                 {
                     await context.Response.Body.WriteAsync(chunk, cancellationToken);
                     await context.Response.Body.FlushAsync(cancellationToken);
+                    // 仅在标记已经写进响应之后记账；扫描只读，不改变透传字节。
+                    if (scan is not null && scan.Feed(chunk.Span)) owner?.CompleteRawRelay();
                 }
             }
 
@@ -757,6 +762,42 @@ internal static class ProtocolResponseWriter
         context.Response.ContentType = "text/event-stream";
         context.Response.Headers.CacheControl = "no-cache";
         context.Response.Headers["X-Accel-Buffering"] = "no";
+    }
+
+    /// <summary>
+    /// 只读扫描 raw 透传字节，判断对应协议的结束标记是否已经中继给客户端。
+    /// 不改动透传内容；调用方在标记之后断开时，宿主据此把请求记为已完成而不是取消。
+    /// 没有已知结束标记的协议返回 null，维持原有取消判定。
+    /// </summary>
+    private sealed class RawCompletionScan(byte[] marker)
+    {
+        private readonly byte[] _marker = marker;
+        private byte[] _keep = [];
+        private bool _seen;
+
+        /// <summary>按当前端点取协议结束标记；如今只覆盖宿主自己也会生成的 SSE 结束帧。</summary>
+        public static RawCompletionScan? For(TestEndpoint endpoint) => endpoint switch
+        {
+            TestEndpoint.ChatCompletions or TestEndpoint.Completions => new RawCompletionScan("data: [DONE]"u8.ToArray()),
+            TestEndpoint.AnthropicMessages => new RawCompletionScan("event: message_stop"u8.ToArray()),
+            TestEndpoint.Responses => new RawCompletionScan("event: response.completed"u8.ToArray()),
+            _ => null
+        };
+
+        /// <summary>喂入一段已成功写出的字节；标记首次出现时返回 true。</summary>
+        public bool Feed(ReadOnlySpan<byte> bytes)
+        {
+            if (_seen) return false;
+            // 保留整个已接收流的尾部，支持标记分散在任意多个小块中。
+            var window = new byte[_keep.Length + bytes.Length];
+            _keep.CopyTo(window, 0);
+            bytes.CopyTo(window.AsSpan(_keep.Length));
+            var hit = window.AsSpan().IndexOf(_marker) >= 0;
+            var keep = Math.Min(_marker.Length - 1, window.Length);
+            _keep = window[^keep..];
+            _seen = hit;
+            return hit;
+        }
     }
 
     private static string MapAnthropicStopReason(string? finishReason, bool hasToolCalls)

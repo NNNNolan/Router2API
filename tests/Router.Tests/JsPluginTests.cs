@@ -359,6 +359,50 @@ public sealed class JsPluginTests
         terminal.ScheduledTasks.Single().Name.Should().Be("js-proxy-demo-check");
     }
 
+    [TestMethod]
+    public async Task OversizedOriginalBodyIsRejectedWithoutSendingOrRetrying()
+    {
+        var pool = new Mock<IProxyPoolHttpClientFactory>(MockBehavior.Strict);
+        using var terminal = CreateTerminal("""
+            export async function invoke(ctx) {
+              try {
+                await ctx.http.open({url:"https://example.com/chat",route:"pool",method:"POST",
+                  originalJson:{source:ctx.request.originalBodyRef,set:{model:"next"}}});
+                return ctx.reply.error(500,"unexpected send");
+              } catch (error) {
+                return ctx.reply.error(413,error.message,{failureKind:"Plugin",retry:"None"});
+              }
+            }
+            """, host: Host(pool));
+        using var original = JsonDocument.Parse(JsonSerializer.Serialize(new
+        {
+            model = "echo", messages = new[] { new { role = "user", content = new string('x', 5_200_000) } }
+        }));
+        var context = new PluginAttemptContext
+        {
+            PluginKey = "js-test", PlatformName = "js-test", TraceId = "large-body",
+            Request = new AdapterRequest { Model = "echo", OriginalBody = original.RootElement.Clone() },
+            Account = Attempt().Account, HttpClient = Mock.Of<IPluginHttpClient>(), CancellationToken = CancellationToken.None
+        };
+        var result = await terminal.InvokeAsync(context);
+        result.Response.StatusCode.Should().Be(413, $"actual error: {result.Response.Error}");
+        result.Response.Error.Should().Contain("HTTP request body is too large");
+        pool.VerifyNoOtherCalls();
+    }
+
+    [TestMethod]
+    public async Task BridgeLimitIsReportedAsPayloadTooLarge()
+    {
+        using var terminal = CreateTerminal($$"""
+            export async function invoke(ctx) { {{Completion}} }
+            """);
+        var attempt = Attempt();
+        attempt.Request.Messages = [new AdapterMessage("user", new string('z', 17 * 1024 * 1024))];
+        var result = await terminal.InvokeAsync(attempt);
+        result.Response.StatusCode.Should().Be(413);
+        result.Response.Error.Should().Contain("MiB");
+    }
+
     private static JsPluginManifest Manifest() => new()
     {
         SchemaVersion = 1, Id = "js-test", Name = "JS test", Version = "0.1.0", Runtime = "jint",

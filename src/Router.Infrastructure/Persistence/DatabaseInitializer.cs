@@ -42,6 +42,7 @@ public sealed class DatabaseInitializer(SqlSugarDatabase database, ILogger<Datab
         EnsureColumn("proxy_endpoints", "ProbeConfigurationVersion", "INTEGER NOT NULL DEFAULT 0");
         EnsureColumn("proxy_endpoints", "ProbeError", "TEXT NULL");
         EnsureColumn("request_logs", "AttemptDetailsJson", "TEXT NULL");
+        EnsureColumn("request_logs", "Cancelled", "INTEGER NULL");
         EnsureColumn("task_logs", "AccountId", "TEXT NULL");
         EnsureColumn("task_logs", "Message", "TEXT NULL");
         EnsureColumn("task_logs", "DetailsJson", "TEXT NULL");

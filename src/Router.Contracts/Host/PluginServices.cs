@@ -144,8 +144,8 @@ public sealed record PluginExecutionOptions
 {
     /// <summary>JS 调用排队时间上限。</summary>
     public TimeSpan QueueTimeout { get; init; } = TimeSpan.FromSeconds(2);
-    /// <summary>单次尝试建立响应前的上限，插件只能进一步缩短。</summary>
-    public TimeSpan SetupTimeout { get; init; } = TimeSpan.FromSeconds(60);
+    /// <summary>单次尝试建立响应前的上限，插件只能进一步缩短；默认与总预算一致。</summary>
+    public TimeSpan SetupTimeout { get; init; } = TimeSpan.FromSeconds(180);
     /// <summary>业务尝试序列建立响应前的总上限。</summary>
     public TimeSpan TotalSetupTimeout { get; init; } = TimeSpan.FromSeconds(180);
     /// <summary>进入响应体阶段后的整体截止时间，不因重试或 chunk 到达而续期。</summary>

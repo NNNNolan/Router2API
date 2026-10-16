@@ -304,7 +304,7 @@ writer 的 finally 和 HTTP OnCompleted 提供回收兜底。未被枚举的流�
 | 全局逻辑 Engine 槽 | Terminal 48、Control 12、Task 4、Job 4、Selection/Callback 共用辅助槽 8 |
 | 每个 JS 终端实例槽 | Terminal 16、Control 2、Task 1、Job 1、Selection/Callback 共用 1 |
 | 等待配额 / 排队 | 每终端最多 32 个等待，默认 2 秒 |
-| setup / 总 setup | 默认 60 / 180 秒，插件只能在宿主范围内进一步限制 |
+| setup / 总 setup | 默认 180 / 180 秒，插件只能在宿主范围内进一步限制 |
 | JS models / validation / selection / callback | 25 / 10 / 5 / 55 秒 |
 | JS start / stop / 导出校验 / 动态页面 | 10 / 5 / 5 / 5 秒 |
 | 管理端点 | Catalog 默认 30 秒，JS 内部 Control 默认 25 秒 |
@@ -312,7 +312,7 @@ writer 的 finally 和 HTTP OnCompleted 提供回收兜底。未被枚举的流�
 | event/end mapper / finalizer | 默认 100 / 250 毫秒 |
 | 异步宿主调用 | 前台 512、Task/Job 8192；同时最多 8 个未完成 |
 | 同步工具 | 每调用 4096 次，单次输入最多 1 MiB |
-| 引擎约束 | 配置分配预算 64 MiB、递归 64、普通语句 50 万、Task/Job 500 万 |
+| 引擎约束 | 配置分配预算 128 MiB、递归 64、普通语句 50 万、Task/Job 500 万 |
 | source / 固定 client | 每 invocation 各最多 4 个 |
 | job | 本版本执行槽 1、未完成 128；完成记录最多 128 且保留一小时 |
 | job input/progress/result | 64 / 64 / 256 KiB，声明 timeout 最大一小时 |

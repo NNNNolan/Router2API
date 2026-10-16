@@ -215,7 +215,7 @@ public sealed class PluginProxyPolicyBuilder
 
     public PluginProxyPolicyBuilder AttemptTimeoutSeconds(int value)
     {
-        AttemptTimeout = TimeSpan.FromSeconds(Math.Clamp(value, 1, 60));
+        AttemptTimeout = TimeSpan.FromSeconds(Math.Clamp(value, 1, 300));
         return this;
     }
     /// <summary>执行公开方法 TotalTimeoutSeconds。</summary>

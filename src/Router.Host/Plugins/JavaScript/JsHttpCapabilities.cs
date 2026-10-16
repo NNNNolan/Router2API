@@ -89,7 +89,9 @@ internal sealed class JsHttpCapabilities(JsPluginManifest manifest, IPluginServi
         if (spec.Client is not null && spec.Route is not null && spec.Route != route)
             throw new InvalidOperationException("A fixed client's route cannot be changed.");
         var uri = await AllowedUriAsync(spec.Url, token);
-        if (!JsPluginManifest.AllowedMethod(spec.Method) || spec.TimeoutMs is < 1 or > 60_000
+        // TimeoutMs 覆盖「发出请求到拿到响应头」的阶段（响应体由 ReadIdleTimeout 按空闲续期），
+        // 允许到 5 分钟：慢推理模型的首个 token 可能耗时一分钟以上。
+        if (!JsPluginManifest.AllowedMethod(spec.Method) || spec.TimeoutMs is < 1 or > 300_000
             || spec.ReadIdleTimeoutMs is < 100 or > 600_000 || spec.ResponseType is not ("json" or "text" or "base64")
             || new[] { spec.Body.HasValue, spec.BodyText is not null, spec.BodyBase64 is not null, spec.Form is not null, spec.OriginalJson is not null }.Count(value => value) > 1)
             throw new InvalidOperationException("Invalid HTTP options.");
@@ -252,7 +254,12 @@ internal sealed class JsHttpCapabilities(JsPluginManifest manifest, IPluginServi
     {
         if (options.Source != invocation.OriginalBodyHandle || invocation.OriginalBody is not { } source)
             throw new UnauthorizedAccessException("Unknown original request handle.");
-        var body = JsonNode.Parse(source.GetRawText()) as JsonObject ?? throw new InvalidOperationException("Original request must be an object.");
+        // 在解析/重建整份请求之前拒绝超限输入，避免大上下文产生多份临时对象。
+        // BuildRequest 仍会检查编辑后的最终大小。
+        var originalText = source.GetRawText();
+        if (Encoding.UTF8.GetByteCount(originalText) > MaxBodyBytes)
+            throw new InvalidOperationException("HTTP request body is too large.");
+        var body = JsonNode.Parse(originalText) as JsonObject ?? throw new InvalidOperationException("Original request must be an object.");
         if (options.Remove.Length + options.Set.Count > 128) throw new InvalidOperationException("Too many original JSON edits.");
         foreach (var key in options.Remove) body.Remove(key);
         foreach (var (key, value) in options.Set) body[key] = JsonNode.Parse(value.GetRawText());

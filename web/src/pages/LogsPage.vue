@@ -17,6 +17,9 @@ const selectedLog = ref<RequestLog | null>(null)
 const detailVisible = ref(false)
 const selectedAttempts = computed(() => selectedLog.value?.attemptDetails ?? [])
 const selectedAttemptDuration = computed(() => selectedAttempts.value.reduce((total, attempt) => total + attempt.durationMs, 0))
+const emptyAttemptHint = computed(() => selectedLog.value?.cancelled
+  ? '请求已被调用方取消，未产生代理尝试'
+  : '未记录到代理尝试，可能在资源选择阶段就失败了。')
 function openDetails(row: RequestLog) { selectedLog.value = row; detailVisible.value = true }
 function attemptTagType(attempt: NonNullable<RequestLog['attemptDetails']>[number]) {
   if (attempt.statusCode !== null && attempt.statusCode >= 200 && attempt.statusCode < 300) return 'success'
@@ -25,7 +28,7 @@ function attemptTagType(attempt: NonNullable<RequestLog['attemptDetails']>[numbe
 function attemptStatus(attempt: NonNullable<RequestLog['attemptDetails']>[number]) { return attempt.statusCode === null ? '未收到 HTTP 响应' : `HTTP ${attempt.statusCode}` }
 const rows = computed(() => query.data.value?.items ?? [])
 const columns: DataTableColumns<RequestLog> = [
-  { title: '时间', key: 'createdAt', render: row => new Date(row.createdAt).toLocaleString() }, { title: '平台', key: 'platform', render: row => row.platform || '—' }, { title: '模型', key: 'model', render: row => row.model || '—' }, { title: '状态码', key: 'statusCode' }, { title: '耗时', key: 'durationMs', render: row => `${row.durationMs} ms` }, { title: '结果', key: 'success', render: row => h(NTag, { type: row.success ? 'success' : 'error', round: true }, { default: () => row.success ? '成功' : '失败' }) }, { title: '详情', key: 'details', render: row => h(NButton, { size: 'small', secondary: true, onClick: () => openDetails(row) }, { default: () => row.attemptDetails?.length ? `查看 (${row.attemptDetails.length})` : '查看' }) },
+  { title: '时间', key: 'createdAt', render: row => new Date(row.createdAt).toLocaleString() }, { title: '平台', key: 'platform', render: row => row.platform || '—' }, { title: '模型', key: 'model', render: row => row.model || '—' }, { title: '状态码', key: 'statusCode' }, { title: '耗时', key: 'durationMs', render: row => `${row.durationMs} ms` }, { title: '结果', key: 'success', render: row => h(NTag, { type: row.success ? 'success' : row.cancelled ? 'warning' : 'error', round: true }, { default: () => row.success ? '成功' : row.cancelled ? '已取消' : '失败' }) }, { title: '详情', key: 'details', render: row => h(NButton, { size: 'small', secondary: true, onClick: () => openDetails(row) }, { default: () => row.attemptDetails?.length ? `查看 (${row.attemptDetails.length})` : '查看' }) },
 ]
 </script>
 <template>
@@ -34,8 +37,8 @@ const columns: DataTableColumns<RequestLog> = [
   </div>
   <NModal v-model:show="detailVisible" preset="card" class="request-detail-modal" :title="selectedLog ? `${selectedLog.model || '模型请求'} · 请求详情` : '请求详情'" style="width: min(820px, calc(100vw - 32px)); height: min(640px, calc(100dvh - 32px)); max-height: calc(100dvh - 32px);">
     <div v-if="selectedLog" class="request-detail">
-      <div class="request-detail-meta"><span>TraceId <code>{{ selectedLog.traceId }}</code></span><span>宿主 {{ selectedLog.durationMs }} ms · 上游 {{ selectedAttemptDuration }} ms · {{ new Date(selectedLog.createdAt).toLocaleString() }}</span></div>
-      <NEmpty v-if="!selectedAttempts.length" description="未记录到代理尝试，可能在资源选择阶段就失败了。" />
+      <div class="request-detail-meta"><span>TraceId <code>{{ selectedLog.traceId }}</code></span><span>宿主 {{ selectedLog.durationMs }} ms · 上游 {{ selectedAttemptDuration }} ms · {{ new Date(selectedLog.createdAt).toLocaleString() }}</span><NTag v-if="selectedLog.cancelled" type="warning" size="small" round>调用方已取消</NTag></div>
+      <NEmpty v-if="!selectedAttempts.length" :description="emptyAttemptHint" />
       <div v-else class="request-attempt-list" role="list">
         <div class="request-attempt-list-header" aria-hidden="true"><span>尝试</span><span>代理</span><span>状态</span><span>结果</span><span>耗时</span></div>
         <div v-for="(attempt, index) in selectedAttempts" :key="`${attempt.proxyId ?? 'direct'}-${index}`" class="request-attempt-row" role="listitem">

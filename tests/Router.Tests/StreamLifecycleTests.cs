@@ -107,6 +107,128 @@ public sealed class StreamLifecycleTests
     }
 
     [TestMethod]
+    public async Task CancellationAfterCompletedWriteDoesNotChangeSuccess()
+    {
+        var response = Response(Chunks());
+        var lifetime = (PluginResponseLifetime)response.Lifetime!;
+        PluginStreamCompletion? finished = null;
+        lifetime.BeginWrite();
+        lifetime.OnCompleted(value => { finished = value; return ValueTask.CompletedTask; });
+        await foreach (var _ in response.Stream!) { }
+        lifetime.CompleteWrite();
+        lifetime.AddResource(() => { lifetime.Fail(true, "request cancelled"); return ValueTask.CompletedTask; });
+        await lifetime.DisposeAsync();
+        finished!.Success.Should().BeTrue();
+        finished.Cancelled.Should().BeFalse();
+        finished.Error.Should().BeNull();
+    }
+
+    [TestMethod]
+    public async Task CancellationBeforeFinalMarkerIsStillCancelledEvenAfterUpstreamEof()
+    {
+        var response = Response(Chunks());
+        var lifetime = (PluginResponseLifetime)response.Lifetime!;
+        PluginStreamCompletion? finished = null;
+        lifetime.BeginWrite();
+        lifetime.OnCompleted(value => { finished = value; return ValueTask.CompletedTask; });
+        await foreach (var _ in response.Stream!) { }
+        lifetime.Fail(true, "request cancelled");
+        await lifetime.DisposeAsync();
+        finished!.Success.Should().BeFalse();
+        finished.Cancelled.Should().BeTrue();
+    }
+
+    [TestMethod]
+    public async Task MidStreamCancellationRemainsCancelled()
+    {
+        var response = Response(Chunks());
+        var lifetime = (PluginResponseLifetime)response.Lifetime!;
+        PluginStreamCompletion? finished = null;
+        lifetime.BeginWrite();
+        lifetime.OnCompleted(value => { finished = value; return ValueTask.CompletedTask; });
+        await foreach (var _ in response.Stream!) break;
+        lifetime.Fail(true, "request cancelled");
+        await lifetime.DisposeAsync();
+        finished!.Success.Should().BeFalse();
+        finished.Cancelled.Should().BeTrue();
+    }
+
+    [TestMethod]
+    public async Task RawRelayThatDeliveredTheDoneMarkerSurvivesTheCallerLeaving()
+    {
+        var cancellation = new CancellationTokenSource();
+        var response = RawResponse(RawThenCancel(["[{}]"u8.ToArray(), "data: [DONE]\n\n"u8.ToArray()], cancellation));
+        var (context, body) = RawContext();
+        await using var stream = body;
+        PluginStreamCompletion? finished = null;
+        ((PluginResponseLifetime)response.Lifetime!).OnCompleted(value => { finished = value; return ValueTask.CompletedTask; });
+        Func<Task> write = () => ProtocolResponseWriter.WriteAsync(context, response, TestEndpoint.ChatCompletions, "test", cancellation.Token);
+        await write.Should().ThrowAsync<OperationCanceledException>();
+        finished!.Success.Should().BeTrue();
+        finished.Cancelled.Should().BeFalse();
+        finished.Error.Should().BeNull();
+    }
+
+    [TestMethod]
+    public async Task RawRelayDetectsADoneMarkerSplitAcrossChunks()
+    {
+        var cancellation = new CancellationTokenSource();
+        var response = RawResponse(RawThenCancel(["data: [D"u8.ToArray(), "ONE]\n\n"u8.ToArray()], cancellation));
+        var (context, body) = RawContext();
+        await using var stream = body;
+        PluginStreamCompletion? finished = null;
+        ((PluginResponseLifetime)response.Lifetime!).OnCompleted(value => { finished = value; return ValueTask.CompletedTask; });
+        Func<Task> write = () => ProtocolResponseWriter.WriteAsync(context, response, TestEndpoint.ChatCompletions, "test", cancellation.Token);
+        await write.Should().ThrowAsync<OperationCanceledException>();
+        finished!.Success.Should().BeTrue();
+        finished.Cancelled.Should().BeFalse();
+    }
+
+    [TestMethod]
+    public async Task RawRelayWithoutTheDoneMarkerIsStillCancelledWhenTheCallerLeaves()
+    {
+        var cancellation = new CancellationTokenSource();
+        var response = RawResponse(RawThenCancel(["data: {\"choices\":["u8.ToArray()], cancellation));
+        var (context, body) = RawContext();
+        await using var stream = body;
+        PluginStreamCompletion? finished = null;
+        ((PluginResponseLifetime)response.Lifetime!).OnCompleted(value => { finished = value; return ValueTask.CompletedTask; });
+        Func<Task> write = () => ProtocolResponseWriter.WriteAsync(context, response, TestEndpoint.ChatCompletions, "test", cancellation.Token);
+        await write.Should().ThrowAsync<OperationCanceledException>();
+        finished!.Success.Should().BeFalse();
+        finished.Cancelled.Should().BeTrue();
+    }
+
+    private static (DefaultHttpContext Context, MemoryStream Body) RawContext()
+    {
+        var context = new DefaultHttpContext();
+        var body = new MemoryStream();
+        context.Response.Body = body;
+        return (context, body);
+    }
+
+    private static AdapterResponse RawResponse(IAsyncEnumerable<ReadOnlyMemory<byte>> stream)
+        => PluginResponseLifetime.Ensure(new AdapterResponse
+        {
+            StatusCode = 200, IsStreaming = true, IsRawPassthrough = true,
+            ContentType = "text/event-stream", RawStream = stream
+        });
+
+    private static async IAsyncEnumerable<ReadOnlyMemory<byte>> RawThenCancel(
+        byte[][] chunks,
+        CancellationTokenSource cancellation,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        foreach (var chunk in chunks)
+        {
+            await Task.CompletedTask;
+            yield return chunk;
+        }
+        cancellation.Cancel();
+        throw new OperationCanceledException(cancellation.Token);
+    }
+
+    [TestMethod]
     public async Task HttpErrorBranchReleasesAStreamWithoutEnumeratingIt()
     {
         var response = PluginResponseLifetime.Ensure(new AdapterResponse
