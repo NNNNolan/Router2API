@@ -112,9 +112,17 @@ public sealed class PluginAttemptExecutor(
             });
             return result with { AttemptDetails = attemptDetails.ToArray() };
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException exception) when (cancellationToken.IsCancellationRequested)
         {
-            throw;
+            totalStopwatch.Stop();
+            await TryWriteLogAsync(new PluginLog
+            {
+                PluginKey = pluginKey, Platform = platformName, TraceId = traceId, Model = request.Model,
+                EventType = "request.cancelled", Message = "request cancelled by caller",
+                DurationMs = (int)totalStopwatch.ElapsedMilliseconds, Level = "Warning",
+                DetailsJson = JsonSerializer.Serialize(new { attempts = attemptDetails.Count, cancelled = true })
+            });
+            throw new PluginRequestCancelledException(exception, attemptDetails.ToArray(), cancellationToken);
         }
         catch (OperationCanceledException) when (invocation.IsCancellationRequested)
         {
@@ -133,6 +141,31 @@ public sealed class PluginAttemptExecutor(
             return new PluginInvocationResult(
                 AdapterResponse.ServerError("upstream request timed out"),
                 new PluginAttemptResult(PluginAttemptOutcome.NoPenalty, Reason: "timeout"),
+                attemptDetails.ToArray());
+        }
+        catch (PluginInputTooLargeException exception)
+        {
+            // 调用方请求体超过插件桥接上限：归为客户端输入问题，不记为插件或上游故障。
+            totalStopwatch.Stop();
+            await TryWriteLogAsync(new PluginLog
+            {
+                PluginKey = pluginKey,
+                Platform = platformName,
+                EventType = "request.too_large",
+                Message = exception.Message,
+                TraceId = traceId,
+                Model = request.Model,
+                StatusCode = 413,
+                DurationMs = (int)totalStopwatch.ElapsedMilliseconds,
+                Level = "Warning"
+            });
+            return new PluginInvocationResult(
+                new AdapterResponse
+                {
+                    StatusCode = 413,
+                    Error = exception.UserMessage
+                },
+                new PluginAttemptResult(PluginAttemptOutcome.NoPenalty, Reason: exception.Message),
                 attemptDetails.ToArray());
         }
         catch (Exception exception)

@@ -110,7 +110,20 @@ internal sealed partial class JsPlatformTerminal : IPlatformTerminal, IPluginMod
         {
             invocation = await OpenInvocationAsync(
                 new JsCallContext(JsCallKind.Terminal, _host.Execution.SetupTimeout, Attempt: context, Token: context.CancellationToken));
-            var result = await invocation.CallAsync(Manifest.Hooks.Invoke, null);
+            JsonNode? result;
+            try
+            {
+                result = await invocation.CallAsync(Manifest.Hooks.Invoke, null);
+            }
+            catch (PluginInputTooLargeException exception)
+            {
+                // 调用方请求体超过 JS 桥接上限：这是客户端输入问题，不是插件或上游故障。
+                return new(new AdapterResponse
+                {
+                    StatusCode = StatusCodes.Status413PayloadTooLarge,
+                    Error = exception.UserMessage
+                }, new PluginAttemptResult(PluginAttemptOutcome.NoPenalty));
+            }
             var response = result?["response"] as JsonObject ?? throw new InvalidOperationException("JS invoke must return response and attempt.");
             var attempt = result?["attempt"]?.Deserialize<PluginAttemptResult>(AttemptJsonOptions)
                 ?? new PluginAttemptResult(PluginAttemptOutcome.NoPenalty);

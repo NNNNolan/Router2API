@@ -189,7 +189,9 @@ internal sealed record JsPolicyManifest
     public JsTransportFailurePolicy TransportFailure { get; init; } = new();
     public void Validate()
     {
-        if (MaxAttempts is < 1 or > 35 || AttemptTimeoutSeconds is < 1 or > 60 || TotalTimeoutSeconds is < 1 or > 180)
+        // AttemptTimeoutSeconds 允许到 300 秒：慢推理模型的首个 token 可能耗时一分钟以上；
+        // 整次调用仍受 TotalTimeoutSeconds（≤180s）与宿主 TotalSetupTimeout 约束。
+        if (MaxAttempts is < 1 or > 35 || AttemptTimeoutSeconds is < 1 or > 300 || TotalTimeoutSeconds is < 1 or > 180)
             throw new InvalidOperationException("Invalid model attempt count or setup timeout.");
         TransportFailure.Decision().Validate();
     }

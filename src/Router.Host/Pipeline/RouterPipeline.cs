@@ -22,6 +22,7 @@ public sealed class RouterPipeline(
         var stopwatch = Stopwatch.StartNew();
         var requestedModel = context.Request.Model;
         var started = false;
+        var cancelled = false;
         string platform;
         string normalizedModel;
         try
@@ -47,8 +48,11 @@ public sealed class RouterPipeline(
             context.Response = result.Response;
             context.AttemptDetails = result.AttemptDetails ?? [];
         }
-        catch (OperationCanceledException) when (context.CancellationToken.IsCancellationRequested)
+        catch (OperationCanceledException exception) when (context.CancellationToken.IsCancellationRequested)
         {
+            cancelled = true;
+            if (exception is PluginRequestCancelledException interrupted)
+                context.AttemptDetails = interrupted.AttemptDetails;
             context.Response = AdapterResponse.ServerError("request cancelled");
             throw;
         }
@@ -67,6 +71,7 @@ public sealed class RouterPipeline(
                 ((PluginResponseLifetime)context.Response.Lifetime!).OnCompleted(async completion =>
                 {
                     metrics.OnStreamEnded(context.SelectedPlatform ?? "unknown");
+                    cancelled = completion.Cancelled;
                     await CompleteAsync(completion.Success, completion.Usage);
                 });
             }
@@ -95,6 +100,7 @@ public sealed class RouterPipeline(
                     Platform = resolvedPlatform,
                     Model = requestedModel,
                     Success = success,
+                    Cancelled = cancelled,
                     StatusCode = context.Response?.StatusCode ?? 500,
                     DurationMs = (int)stopwatch.ElapsedMilliseconds,
                     Usage = usage,

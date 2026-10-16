@@ -613,6 +613,8 @@ public sealed class ResourceEvent
 
 public sealed class RequestLog
 {
+    /// <summary>请求是否被调用方取消。</summary>
+    public bool Cancelled { get; init; }
     /// <summary>获取或设置公开成员 Id。</summary>
     public string Id { get; init; } = Guid.NewGuid().ToString("N");
     /// <summary>获取或设置公开成员 TraceId。</summary>

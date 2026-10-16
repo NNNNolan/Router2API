@@ -108,7 +108,7 @@ export interface ModelPlazaModel {
 }
 export interface ModelPlazaResponse { updatedAt: string; source: string; models: ModelPlazaModel[] }
 export interface RequestAttemptDetail { proxyId: string | null; proxyAddress: string; statusCode: number | null; outcome: string; isTransportFailure: boolean; reason: string | null; durationMs: number }
-export interface RequestLog { id: string; traceId: string; platform: string | null; model: string | null; success: boolean; statusCode: number; durationMs: number; ttfbMs: number | null; usage: { promptTokens: number; completionTokens: number; totalTokens: number } | null; attemptDetails?: RequestAttemptDetail[]; createdAt: string }
+export interface RequestLog { cancelled?: boolean; id: string; traceId: string; platform: string | null; model: string | null; success: boolean; statusCode: number; durationMs: number; ttfbMs: number | null; usage: { promptTokens: number; completionTokens: number; totalTokens: number } | null; attemptDetails?: RequestAttemptDetail[]; createdAt: string }
 export interface TaskLog { id: string; pluginKey: string; platform: string | null; taskName: string; accountId: string | null; status: string; message: string | null; error: string | null; detailsJson: string | null; durationMs: number; startedAt: string; finishedAt: string | null }
 export interface PluginLog { id: string; pluginKey: string; platform: string | null; level: string; eventType: string; message: string; traceId: string | null; taskName: string | null; accountId: string | null; model: string | null; statusCode: number | null; durationMs: number | null; detailsJson: string | null; createdAt: string }
 export interface ConfigSnapshot {

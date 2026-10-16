@@ -7,6 +7,7 @@ using Jint.Runtime;
 using Acornima.Ast;
 using Router.Contracts.Host;
 using Router.Contracts.Domain;
+using Router.Contracts.Plugins;
 using static Router.Host.Plugins.JavaScript.JsPluginCodec;
 
 namespace Router.Host.Plugins.JavaScript;
@@ -38,6 +39,9 @@ internal sealed class JsInvocation : IAsyncDisposable
     private bool _claimed;
     public JsCallContext Context { get; }
     public CancellationToken Token => _operation.Token;
+    /// <summary>桥接上限：宿主序列化后的元数据加输入不得超过它。</summary>
+    private const int BridgeLimitBytes = 16 * 1024 * 1024;
+
     public string? OriginalBodyHandle { get; }
     public JsonElement? OriginalBody => Context.Attempt?.Request.OriginalBody;
 
@@ -70,7 +74,10 @@ internal sealed class JsInvocation : IAsyncDisposable
             options.TimeoutInterval(context.Timeout);
             options.RegexTimeoutInterval(TimeSpan.FromMilliseconds(100));
             options.MaxStatements(context.Kind is JsCallKind.Task or JsCallKind.Job ? 5_000_000 : 500_000);
-            options.LimitMemory(64 * 1024 * 1024);
+            // 引擎上限必须能容纳桥接允许的最大输入（CallAsync 的 16 MiB 元数据）：
+            // JSON.parse 16 MiB 文本会产生 UTF-16 字符串加解析对象，远超 64 MiB。
+            // 这里仍保留硬上限，脚本失控时会被终止。
+            options.LimitMemory(128 * 1024 * 1024);
             options.LimitRecursion(64);
             options.CancellationToken(Token);
             options.Constraint(_step);
@@ -115,8 +122,8 @@ internal sealed class JsInvocation : IAsyncDisposable
         if (handler is null) return null;
         var metadata = JsonSerializer.Serialize(BuildContext(_manifest, Context, OriginalBodyHandle), JsonOptions);
         var inputJson = JsonSerializer.Serialize(input, JsonOptions);
-        if (Encoding.UTF8.GetByteCount(metadata) + Encoding.UTF8.GetByteCount(inputJson) > 16 * 1024 * 1024)
-            throw new InvalidOperationException("JS input exceeds the bridge limit.");
+        if (Encoding.UTF8.GetByteCount(metadata) + Encoding.UTF8.GetByteCount(inputJson) > BridgeLimitBytes)
+            throw new PluginInputTooLargeException(BridgeLimitBytes, "JS input exceeds the bridge limit.");
         await _engineGate.WaitAsync(Token);
         try
         {

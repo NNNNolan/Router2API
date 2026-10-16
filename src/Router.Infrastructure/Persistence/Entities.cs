@@ -145,6 +145,8 @@ public sealed class ProxyEndpointEntity
 [SugarTable("request_logs")]
 public sealed class RequestLogEntity
 {
+    [SugarColumn(IsNullable = true)]
+    public bool? Cancelled { get; set; }
     [SugarColumn(IsPrimaryKey = true, Length = 64)]
     public string Id { get; set; } = string.Empty;
 
