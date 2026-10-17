@@ -254,20 +254,20 @@ internal sealed class JsInvocation : IAsyncDisposable
         return selected;
     }
 
-    public JsonObject Map(string handler, object input, JsonNode? state)
+    public JsonDocument Map(string handler, object input, string stateJson)
     {
         _engineGate.Wait(Token);
         try
         {
             _mappingViolation = false;
-            var stateJson = state?.ToJsonString(JsonOptions) ?? "null";
             if (Encoding.UTF8.GetByteCount(stateJson) > 512 * 1024)
                 throw new InvalidOperationException("Stream state exceeds its size limit.");
             _step.Begin(_execution.MapperBudget, Token);
             var output = _engine.Invoke("__map", handler, JsonSerializer.Serialize(input, JsonOptions), stateJson).AsString();
             if (_mappingViolation) throw new InvalidOperationException("Host operations are not allowed inside stream mappers.");
-            return ParseResult(output, 2 * 1024 * 1024) as JsonObject
-                ?? throw new InvalidOperationException("Stream mapper must return an object.");
+            if (Encoding.UTF8.GetByteCount(output) > 2 * 1024 * 1024)
+                throw new InvalidOperationException("JS output exceeds its size limit.");
+            return JsonDocument.Parse(output, new JsonDocumentOptions { MaxDepth = 48 });
         }
         finally { _step.End(); _engineGate.Release(); }
     }

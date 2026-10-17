@@ -7,6 +7,8 @@ namespace Router.Infrastructure.Services;
 /// <summary>把客户端声明的推理参数限制在模型能力目录已探测到的范围内。</summary>
 internal static class ReasoningLimiter
 {
+    private static readonly string[] NestedEffortKeys = ["reasoning", "thinking", "output_config"];
+
     public static bool HasReasoning(AdapterRequest request)
         => request.Extensions.ContainsKey("reasoning_effort")
             || request.Extensions.ContainsKey("effort")
@@ -49,7 +51,7 @@ internal static class ReasoningLimiter
             ?? ReadString(extensions, "effort");
         if (!string.IsNullOrWhiteSpace(effort)) return effort;
 
-        foreach (var key in new[] { "reasoning", "thinking", "output_config" })
+        foreach (var key in NestedEffortKeys)
         {
             if (!extensions.TryGetValue(key, out var raw) || raw is null) continue;
             var node = ToObject(raw);
@@ -62,47 +64,56 @@ internal static class ReasoningLimiter
         return null;
     }
 
-    private static string ClosestSupportedLevel(string requested, IReadOnlyList<string> levels)
+    internal static string ClosestSupportedLevel(string requested, IReadOnlyList<string> levels)
     {
         var normalized = NormalizeEffort(requested);
-        foreach (var level in levels)
-            if (NormalizeEffort(level).Equals(normalized, StringComparison.OrdinalIgnoreCase))
-                return level;
+        for (var index = 0; index < levels.Count; index++)
+            if (NormalizeEffort(levels[index]).Equals(normalized, StringComparison.OrdinalIgnoreCase))
+                return levels[index];
 
         var requestedRank = KnownRank(normalized);
         if (requestedRank < 0) return levels[^1];
 
-        return levels
-            .Select((level, index) => (Level: level, Index: index, Rank: KnownRank(NormalizeEffort(level))))
-            .Where(candidate => candidate.Rank >= 0)
-            .OrderBy(candidate => Math.Abs(candidate.Rank - requestedRank))
-            .ThenBy(candidate => candidate.Rank > requestedRank)
-            .ThenBy(candidate => candidate.Index)
-            .Select(candidate => candidate.Level)
-            .FirstOrDefault() ?? levels[^1];
+        var bestIndex = -1;
+        var bestDistance = int.MaxValue;
+        var bestRank = int.MaxValue;
+        for (var index = 0; index < levels.Count; index++)
+        {
+            var rank = KnownRank(NormalizeEffort(levels[index]));
+            if (rank < 0) continue;
+            var distance = Math.Abs(rank - requestedRank);
+            // Equal distance prefers the lower effort, then the original order.
+            if (distance < bestDistance || distance == bestDistance && rank <= requestedRank && bestRank > requestedRank)
+            {
+                bestIndex = index;
+                bestRank = rank;
+                bestDistance = distance;
+            }
+        }
+        return bestIndex < 0 ? levels[^1] : levels[bestIndex];
     }
 
-    private static int KnownRank(string value)
-        => value.Trim().ToLowerInvariant() switch
-        {
-            "minimal" => 0,
-            "low" => 1,
-            "medium" => 2,
-            "high" => 3,
-            "xhigh" => 4,
-            "max" => 5,
-            _ => -1
-        };
+    private static int KnownRank(ReadOnlySpan<char> value)
+    {
+        value = value.Trim();
+        if (value.Equals("minimal", StringComparison.OrdinalIgnoreCase)) return 0;
+        if (value.Equals("low", StringComparison.OrdinalIgnoreCase)) return 1;
+        if (value.Equals("medium", StringComparison.OrdinalIgnoreCase)) return 2;
+        if (value.Equals("high", StringComparison.OrdinalIgnoreCase)) return 3;
+        if (value.Equals("xhigh", StringComparison.OrdinalIgnoreCase)) return 4;
+        if (value.Equals("max", StringComparison.OrdinalIgnoreCase)) return 5;
+        return -1;
+    }
 
-    private static string NormalizeEffort(string value)
-        => value.Trim().ToLowerInvariant() switch
-        {
-            "very_low" or "very-low" => "low",
-            "normal" => "medium",
-            "very_high" or "very-high" or "extra-high" => "xhigh",
-            "ultra" => "max",
-            var normalized => normalized
-        };
+    private static ReadOnlySpan<char> NormalizeEffort(ReadOnlySpan<char> value)
+    {
+        value = value.Trim();
+        if (value.Equals("very_low", StringComparison.OrdinalIgnoreCase) || value.Equals("very-low", StringComparison.OrdinalIgnoreCase)) return "low";
+        if (value.Equals("normal", StringComparison.OrdinalIgnoreCase)) return "medium";
+        if (value.Equals("very_high", StringComparison.OrdinalIgnoreCase) || value.Equals("very-high", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("extra-high", StringComparison.OrdinalIgnoreCase)) return "xhigh";
+        return value.Equals("ultra", StringComparison.OrdinalIgnoreCase) ? "max" : value;
+    }
 
     private static bool IsReasoningDisabled(string effort)
         => effort.Equals("none", StringComparison.OrdinalIgnoreCase)

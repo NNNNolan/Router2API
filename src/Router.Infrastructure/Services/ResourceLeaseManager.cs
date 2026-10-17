@@ -24,20 +24,20 @@ public sealed class ResourceLeaseManager : IResourceLeaseManager
         while (DateTimeOffset.UtcNow < deadline)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var selected = resources.FirstOrDefault(resource =>
-                !_exclusivePending.ContainsKey(resource.Id)
-                && isAvailable(resource));
+            T? selected = null;
+            for (var index = 0; index < resources.Count; index++)
+            {
+                var resource = resources[index];
+                if (_exclusivePending.ContainsKey(resource.Id) || !isAvailable(resource)) continue;
+                selected = resource;
+                break;
+            }
 
             if (selected is not null)
             {
                 lock (selected.Status)
                     selected.Status.InFlight++;
-                return new ResourceLeaseResult<T>(selected, new Lease(() =>
-                {
-                    lock (selected.Status)
-                        selected.Status.InFlight--;
-                    return ValueTask.CompletedTask;
-                }));
+                return new ResourceLeaseResult<T>(selected, new Lease(selected.Status));
             }
 
             await Task.Delay(50, cancellationToken);
@@ -88,14 +88,17 @@ public sealed class ResourceLeaseManager : IResourceLeaseManager
         }
     }
 
-    private sealed class Lease(Func<ValueTask> release) : IAsyncDisposable
+    private sealed class Lease(ResourceStatus status) : IAsyncDisposable
     {
         private int _released;
 
-        public async ValueTask DisposeAsync()
+        public ValueTask DisposeAsync()
         {
             if (Interlocked.Exchange(ref _released, 1) == 0)
-                await release();
+            {
+                lock (status) status.InFlight--;
+            }
+            return ValueTask.CompletedTask;
         }
     }
 }

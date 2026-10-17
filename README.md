@@ -270,6 +270,29 @@ pnpm --dir web build
 
 宿主测试中的 `Fixtures/js-proxy-demo` 是离线夹具，不随宿主安装。C# ForwardAPI 测试归对应仓库，JS 业务只做 Node 模拟测试。宿主不依赖提供方项目，也无默认 forwardapi 代理测试、专属日志脱敏例外或专属协议目录抓取；公共模型能力仅从 models.dev 获取。
 
+### 分配与并发性能回归
+
+保持 `Router.Contracts` 和 Host API 不变。分配预算覆盖预热后的指定热路径，不代表 SqlSugar、Jint、网络请求或整个宿主进程零分配。
+
+```powershell
+dotnet test tests/Router.Tests/Router.Tests.csproj -c Release --disable-build-servers -m:1 -p:ConcurrentBuild=false -p:UseSharedCompilation=false --filter 'TestCategory=Performance' --logger 'console;verbosity=detailed'
+```
+
+测试使用同步内存输入和 `GC.GetAllocatedBytesForCurrentThread()`，测量区间禁止跨线程；网络与 Redis 的异步分配需另用进程级 profiler 测量。预算与夹具见 `AllocationBudgetTests` 和 `JsStreamingTests`，修改夹具后需要重新测量。
+
+| 路径 | 回归预算 | 当前本地 Release 样本 |
+| --- | --- | --- |
+| 字段名比较、推理等级选择、策略读取、结束标记扫描、指标计数、Chat JSON 编码 | 0 B/op | 0 B/op |
+| raw 读取及结束标记扫描 | 分配不随 16 KiB 数据块数量增长 | 16 KiB / 1 MiB 均为 456 B/流 |
+| SSE 小事件分帧 | 增量 ≤112 B/帧 | 96 B/帧 |
+| Chat SSE 编码及写入 `Stream.Null` | 0 B/帧 | 0 B/帧 |
+| OAuth 凭据解码 | ≤2048 B/次 | 904 B/次 |
+| Jint SSE 映射，含完整标准 chunk 的 JSON 往返 | ≤36 KiB/帧 | 32504 B/帧 |
+
+raw 内部块借用本流的池化缓冲区，有效期到下一次 `MoveNextAsync` 或枚举器释放；宿主必须等待下游写入完成再推进，不得缓存这些块。归还缓冲区时清除内容。SSE 帧、字符串和 JS JSON 仍有分配，JS state 大小、chunk 数量及执行预算继续强制检查。
+
+并发回归覆盖八个 worker 的 raw 内容隔离、HTTP 客户端租约及账号 InFlight 平衡。模型发现把可能同步阻塞的插件调用放到受限 worker 中，同一终端最多一个真实查询在途；调用方超时不提前释放该查询的客户端，也不因重复刷新累积阻塞 worker。共享 HTTP 传输池仍按连接配置隔离，账号、客户端和 Jint Engine 不跨请求复用。
+
 ## 开源许可与边界
 
 本仓库采用 [MIT License](LICENSE)，允许商业使用、修改和分发；复制或分发代码时须保留版权声明和许可声明。软件按“原样”提供，不提供任何担保，完整条款见许可证文件。

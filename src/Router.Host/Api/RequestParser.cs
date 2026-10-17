@@ -103,9 +103,11 @@ internal static class RequestParser
     {
         if (body.ValueKind != JsonValueKind.Object) return;
 
-        foreach (var property in body.EnumerateObject())
+        // Extensions share the already-owned snapshot, so disposing the input is safe
+        // without cloning every extension into another JsonDocument.
+        foreach (var property in request.OriginalBody!.Value.EnumerateObject())
             if (!StructuralProperties.Contains(property.Name))
-                request.Extensions[property.Name] = property.Value.Clone();
+                request.Extensions[property.Name] = property.Value;
     }
 
     private static List<AdapterMessage> ReadChatMessages(JsonElement body)

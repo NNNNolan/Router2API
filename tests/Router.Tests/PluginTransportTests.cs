@@ -10,6 +10,23 @@ namespace Router.Tests;
 public sealed class PluginTransportTests
 {
     [TestMethod]
+    public void ParallelClientLeasesShareProfilesAndReleaseBeforeConfigurationEviction()
+    {
+        using var transport = new ProxyTransportFactory();
+        Parallel.For(0, 8, _ =>
+        {
+            for (var index = 0; index < 200; index++)
+            {
+                using var client = transport.CreateClient(Node(1));
+                client.Timeout.Should().Be(TimeSpan.FromSeconds(60));
+            }
+        });
+        transport.CachedHandlerCount.Should().Be(1);
+        using var updated = transport.CreateClient(Node(2));
+        transport.CachedHandlerCount.Should().Be(1, "all old leases must have been released under contention");
+    }
+
+    [TestMethod]
     public async Task LegacyAndPoolClientsShareTheSamePhysicalTransport()
     {
         using var transport = new ProxyTransportFactory();

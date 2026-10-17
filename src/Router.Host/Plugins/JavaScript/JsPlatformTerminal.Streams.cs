@@ -31,11 +31,12 @@ internal sealed partial class JsPlatformTerminal
         await using var stream = await source.OpenStreamAsync(linked.Token);
         var endReason = "eof";
         string? finish = null;
+        var stateJson = state?.ToJsonString(JsonOptions) ?? "null";
         await foreach (var frame in SseFrameReader.ReadAsync(stream, idleTimeout: source.ReadIdleTimeout, cancellationToken: linked.Token))
         {
             if (frame.IsComment) { yield return default; continue; }
-            var batch = MapBatch(invocation, mapper.Event, frame, state);
-            state = batch.State;
+            var batch = MapBatch(invocation, mapper.Event, frame, stateJson);
+            stateJson = batch.State;
             foreach (var chunk in batch.Chunks)
             {
                 finish = chunk.FinishReason ?? finish;
@@ -46,7 +47,7 @@ internal sealed partial class JsPlatformTerminal
             if (batch.Done) { endReason = "protocol"; break; }
         }
 
-        var ending = MapBatch(invocation, mapper.End, new { reason = endReason }, state);
+        var ending = MapBatch(invocation, mapper.End, new { reason = endReason }, stateJson);
         foreach (var chunk in ending.Chunks)
         {
             finish = chunk.FinishReason ?? finish;
@@ -60,31 +61,33 @@ internal sealed partial class JsPlatformTerminal
             yield return new StreamChunk(null, finish);
     }
 
-    private static MappedBatch MapBatch(JsInvocation invocation, string handler, object frame, JsonNode? state)
+    private static MappedBatch MapBatch(JsInvocation invocation, string handler, object frame, string state)
     {
         try
         {
-            var mapped = invocation.Map(handler, frame, state);
-            if (!mapped.ContainsKey("state") || mapped["chunks"] is not JsonArray)
+            using var mapped = invocation.Map(handler, frame, state);
+            var root = mapped.RootElement;
+            if (root.ValueKind != JsonValueKind.Object || !root.TryGetProperty("state", out var nextState)
+                || !root.TryGetProperty("chunks", out var rawChunks) || rawChunks.ValueKind != JsonValueKind.Array)
                 throw new InvalidOperationException("A mapper must return state and chunks.");
-            var nextState = mapped["state"];
-            mapped.Remove("state");
-            if (Encoding.UTF8.GetByteCount(nextState?.ToJsonString(JsonOptions) ?? "null") > 512 * 1024)
+            var nextStateJson = JsonSerializer.Serialize(nextState, JsonOptions);
+            if (Encoding.UTF8.GetByteCount(nextStateJson) > 512 * 1024)
                 throw new InvalidOperationException("Stream state exceeds its size limit.");
-            var chunks = mapped["chunks"]!.Deserialize<StreamChunk[]>(JsonOptions)!;
-            if (chunks.Length > 128) throw new InvalidOperationException("Too many chunks from one mapper event.");
+            if (rawChunks.GetArrayLength() > 128) throw new InvalidOperationException("Too many chunks from one mapper event.");
+            var chunks = rawChunks.Deserialize<StreamChunk[]>(JsonOptions)!;
             foreach (var chunk in chunks)
             {
                 ValidateUsage(chunk.Usage);
                 if (chunk.ToolCalls is { } tools && (tools.Count > 128 || tools.Any(tool => tool.Index < 0 || tool.Index > 1023)))
                     throw new InvalidOperationException("Invalid tool call indices.");
             }
-            return new MappedBatch(nextState, chunks, mapped["done"]?.GetValue<bool>() == true);
+            return new MappedBatch(nextStateJson, chunks,
+                root.TryGetProperty("done", out var done) && done.ValueKind != JsonValueKind.Null && done.GetBoolean());
         }
         catch (Exception exception)
         {
             invocation.Context.Token.ThrowIfCancellationRequested();
-            return new MappedBatch(null,
+            return new MappedBatch("null",
                 [new StreamChunk(null, Error: SafeError(exception, invocation.Context.Attempt?.Account), ErrorType: "plugin_mapping_error")], true);
         }
     }
@@ -153,7 +156,7 @@ internal sealed partial class JsPlatformTerminal
             throw new InvalidOperationException("Usage cannot be negative.");
     }
 
-    private sealed record MappedBatch(JsonNode? State, StreamChunk[] Chunks, bool Done);
+    private readonly record struct MappedBatch(string State, StreamChunk[] Chunks, bool Done);
     private sealed class AggregatedTool
     {
         public string? Id { get; set; }

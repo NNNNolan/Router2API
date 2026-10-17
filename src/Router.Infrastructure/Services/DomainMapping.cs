@@ -214,37 +214,33 @@ internal static class CredentialCodec
         {
             using var document = JsonDocument.Parse(string.IsNullOrWhiteSpace(json) ? "{}" : json);
             var root = document.RootElement;
-            var normalizedKind = Normalize(kind);
+            var values = ReadFields(root);
 
-            if (normalizedKind is "apikey" or "key" || Read(root, "apiKey", "api_key", "key") is not null)
-                return new ApiKeyCredential(Read(root, "apiKey", "api_key", "key") ?? string.Empty);
+            if (NameEquals(kind, "apikey") || NameEquals(kind, "key") || IsPresent(values.ApiKey))
+                return new ApiKeyCredential(Text(values.ApiKey) ?? string.Empty);
 
-            if (normalizedKind is "basicauth" or "basic" or "usernamepassword"
-                || Read(root, "username") is not null && Read(root, "password") is not null)
-                return new BasicAuthCredential(Read(root, "username") ?? string.Empty, Read(root, "password") ?? string.Empty);
+            if (NameEquals(kind, "basicauth") || NameEquals(kind, "basic") || NameEquals(kind, "usernamepassword")
+                || IsPresent(values.Username) && IsPresent(values.Password))
+                return new BasicAuthCredential(Text(values.Username) ?? string.Empty, Text(values.Password) ?? string.Empty);
 
-            if (normalizedKind is "oauth" or "oauth2" or "tokenbundle"
-                || Read(root, "accessToken", "access_token") is not null
-                || Read(root, "refreshToken", "refresh_token", "idToken", "id_token", "accountId", "account_id") is not null)
+            if (NameEquals(kind, "oauth") || NameEquals(kind, "oauth2") || NameEquals(kind, "tokenbundle")
+                || IsPresent(values.AccessToken) || IsPresent(values.OAuthHint))
                 return new OAuthCredential(
-                    Read(root, "accessToken", "access_token") ?? string.Empty,
-                    ParseDate(Read(root, "expiresAt", "expires_at")),
-                    Read(root, "refreshToken", "refresh_token"),
-                    Read(root, "idToken", "id_token"),
-                    Read(root, "accountId", "account_id"),
-                    Read(root, "domain"),
-                    Read(root, "enterpriseId", "enterprise_id"),
-                    Read(root, "nickname", "displayName", "display_name"));
+                    Text(values.AccessToken) ?? string.Empty,
+                    ParseDate(Text(values.ExpiresAt)),
+                    Text(values.RefreshToken),
+                    Text(values.IdToken),
+                    Text(values.AccountId),
+                    Text(values.Domain),
+                    Text(values.EnterpriseId),
+                    Text(values.Nickname));
 
-            if (normalizedKind is "bearer" or "bearertoken" or "token"
-                || Read(root, "token") is not null)
-                return new BearerTokenCredential(
-                    Read(root, "token") ?? string.Empty,
-                    ParseDate(Read(root, "expiresAt", "expires_at")));
+            if (NameEquals(kind, "bearer") || NameEquals(kind, "bearertoken") || NameEquals(kind, "token")
+                || IsPresent(values.Token))
+                return new BearerTokenCredential(Text(values.Token) ?? string.Empty, ParseDate(Text(values.ExpiresAt)));
 
-            if (normalizedKind is "cookie" || Read(root, "cookie") is not null)
-                return new CookieCredential(Read(root, "cookie") ?? string.Empty);
-
+            if (NameEquals(kind, "cookie") || IsPresent(values.Cookie))
+                return new CookieCredential(Text(values.Cookie) ?? string.Empty);
             var fields = root.ValueKind == JsonValueKind.Object
                 ? root.EnumerateObject()
                     .Where(property => property.Value.ValueKind is JsonValueKind.String or JsonValueKind.Number or JsonValueKind.True or JsonValueKind.False)
@@ -260,21 +256,80 @@ internal static class CredentialCodec
         }
     }
 
-    private static string Normalize(string? value)
-        => (value ?? string.Empty).Replace("_", string.Empty).Replace("-", string.Empty).ToLowerInvariant();
-
-    private static string? Read(JsonElement root, params string[] names)
+    // Compare legacy spellings without creating normalized strings.
+    internal static bool NameEquals(ReadOnlySpan<char> value, ReadOnlySpan<char> expected)
     {
-        if (root.ValueKind != JsonValueKind.Object) return null;
-        foreach (var property in root.EnumerateObject())
+        var index = 0;
+        var expectedIndex = 0;
+        while (true)
         {
-            if (!names.Any(name => Normalize(property.Name) == Normalize(name))) continue;
-            return property.Value.ValueKind == JsonValueKind.Null ? null : property.Value.ToString();
+            while (index < value.Length && value[index] is '_' or '-') index++;
+            while (expectedIndex < expected.Length && expected[expectedIndex] is '_' or '-') expectedIndex++;
+            if (index == value.Length || expectedIndex == expected.Length)
+                return index == value.Length && expectedIndex == expected.Length;
+            if (char.ToLowerInvariant(value[index++]) != char.ToLowerInvariant(expected[expectedIndex++])) return false;
         }
-
-        return null;
     }
 
+    private static CredentialFields ReadFields(JsonElement root)
+    {
+        var fields = new CredentialFields();
+        if (root.ValueKind != JsonValueKind.Object) return fields;
+        foreach (var property in root.EnumerateObject())
+        {
+            var name = property.Name;
+            switch (name)
+            {
+                case var _ when NameEquals(name, "apiKey") || NameEquals(name, "key"): SetFirst(ref fields.ApiKey, property.Value); break;
+                case var _ when NameEquals(name, "username"): SetFirst(ref fields.Username, property.Value); break;
+                case var _ when NameEquals(name, "password"): SetFirst(ref fields.Password, property.Value); break;
+                case var _ when NameEquals(name, "accessToken"): SetFirst(ref fields.AccessToken, property.Value); break;
+                case var _ when NameEquals(name, "refreshToken"):
+                    SetFirst(ref fields.RefreshToken, property.Value); SetFirst(ref fields.OAuthHint, property.Value); break;
+                case var _ when NameEquals(name, "idToken"):
+                    SetFirst(ref fields.IdToken, property.Value); SetFirst(ref fields.OAuthHint, property.Value); break;
+                case var _ when NameEquals(name, "accountId"):
+                    SetFirst(ref fields.AccountId, property.Value); SetFirst(ref fields.OAuthHint, property.Value); break;
+                case var _ when NameEquals(name, "domain"): SetFirst(ref fields.Domain, property.Value); break;
+                case var _ when NameEquals(name, "enterpriseId"): SetFirst(ref fields.EnterpriseId, property.Value); break;
+                case var _ when NameEquals(name, "nickname") || NameEquals(name, "displayName"): SetFirst(ref fields.Nickname, property.Value); break;
+                case var _ when NameEquals(name, "expiresAt"): SetFirst(ref fields.ExpiresAt, property.Value); break;
+                case var _ when NameEquals(name, "token"): SetFirst(ref fields.Token, property.Value); break;
+                case var _ when NameEquals(name, "cookie"): SetFirst(ref fields.Cookie, property.Value); break;
+            }
+        }
+        return fields;
+    }
+
+    private static void SetFirst(ref JsonElement field, JsonElement value)
+    {
+        // First matching property wins, including an explicit null.
+        if (field.ValueKind == JsonValueKind.Undefined) field = value;
+    }
+
+    private static string? Text(JsonElement value)
+        => value.ValueKind is JsonValueKind.Undefined or JsonValueKind.Null ? null : value.ToString();
+
+    private static bool IsPresent(JsonElement value)
+        => value.ValueKind is not (JsonValueKind.Undefined or JsonValueKind.Null);
+
+    private struct CredentialFields
+    {
+        public JsonElement ApiKey;
+        public JsonElement Username;
+        public JsonElement Password;
+        public JsonElement AccessToken;
+        public JsonElement RefreshToken;
+        public JsonElement IdToken;
+        public JsonElement AccountId;
+        public JsonElement Domain;
+        public JsonElement EnterpriseId;
+        public JsonElement Nickname;
+        public JsonElement ExpiresAt;
+        public JsonElement Token;
+        public JsonElement Cookie;
+        public JsonElement OAuthHint;
+    }
     private static DateTimeOffset? ParseDate(string? value)
         => DateTimeOffset.TryParse(value, out var date) ? date : null;
 }

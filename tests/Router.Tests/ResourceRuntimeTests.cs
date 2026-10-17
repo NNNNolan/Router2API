@@ -8,6 +8,26 @@ namespace Router.Tests;
 public sealed class ResourceRuntimeTests
 {
     [TestMethod]
+    public async Task ParallelAcquireAndDoubleReleaseKeepInflightBalanced()
+    {
+        var manager = new ResourceLeaseManager();
+        var account = new Account { PluginKey = "probe", Platform = "probe" };
+        Account[] candidates = [account];
+        await Task.WhenAll(Enumerable.Range(0, 8).Select(_ => Task.Run(async () =>
+        {
+            for (var index = 0; index < 200; index++)
+            {
+                var acquired = await manager.AcquireAsync(candidates, static _ => true, TimeSpan.FromSeconds(5));
+                if (acquired is not { } lease) throw new InvalidOperationException("Lease was not acquired.");
+                await Task.Yield();
+                await lease.Lease.DisposeAsync();
+                await lease.Lease.DisposeAsync();
+            }
+        })));
+        account.Status.InFlight.Should().Be(0);
+    }
+
+    [TestMethod]
     public async Task LeaseIsReleasedExactlyOnce()
     {
         var manager = new ResourceLeaseManager();

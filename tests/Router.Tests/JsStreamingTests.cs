@@ -12,6 +12,45 @@ namespace Router.Tests;
 [TestClass]
 public sealed class JsStreamingTests
 {
+    public TestContext TestContext { get; set; } = null!;
+
+    [TestMethod]
+    [TestCategory("Performance")]
+    public async Task JsMapperHasAPerFrameAllocationBudget()
+    {
+        var bytes = Encoding.UTF8.GetBytes(string.Concat(Enumerable.Repeat(Data(new StreamChunk("delta")), 256)) + "data: [DONE]\n\n");
+        using var terminal = Terminal(() => new ByteArrayContent(bytes));
+        var result = await terminal.InvokeAsync(Context(streaming: true));
+        await using var reader = result.Response.Stream!.GetAsyncEnumerator();
+        for (var index = 0; index < 32; index++) (await reader.MoveNextAsync()).Should().BeTrue();
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        for (var index = 0; index < 128; index++)
+        {
+            var next = reader.MoveNextAsync();
+            if (!next.IsCompletedSuccessfully || !next.Result)
+                throw new InvalidOperationException("The mapper budget probe must consume synchronous memory-backed frames.");
+        }
+        var perFrame = (GC.GetAllocatedBytesForCurrentThread() - before) / 128.0;
+        TestContext.WriteLine($"Jint SSE + mapper + standard chunk: {perFrame:F1} B/frame");
+        // Includes Jint JSON.parse/stringify of the complete canonical chunk;
+        // this is a regression ceiling for this fixture, not a zero-allocation claim.
+        perFrame.Should().BeLessThanOrEqualTo(36 * 1024);
+    }
+
+    [TestMethod]
+    public async Task MapperStateAndChunkQuotasAreStillEnforced()
+    {
+        foreach (var map in new[] { "return {state:{value:'中'.repeat(100000)},chunks:[]};",
+            "return {state,chunks:Array.from({length:129},()=>({delta:'x'}))};" })
+        {
+            using var terminal = Terminal(() => new ByteArrayContent(Encoding.UTF8.GetBytes(Sample())), map: map);
+            var result = await terminal.InvokeAsync(Context(streaming: true));
+            var chunks = await CollectAsync(result.Response);
+            chunks.Last().ErrorType.Should().Be("plugin_mapping_error");
+            chunks.Any(chunk => chunk.FinishReason is not null).Should().BeFalse();
+        }
+    }
+
     private const string DefaultMap = """
         if (frame.data === "[DONE]") { state.done=true; return {state,chunks:[],done:true}; }
         const value=JSON.parse(frame.data);

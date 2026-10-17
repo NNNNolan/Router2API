@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Runtime.CompilerServices;
 
 namespace Router.Host.Plugins.JavaScript;
@@ -48,25 +49,31 @@ internal sealed class JsHttpSource(
         finally { Volatile.Write(ref _reading, 0); }
     }
 
+    // Chunks borrow the reader's buffer until the next MoveNextAsync/DisposeAsync.
+    // Every host consumer must finish writing a chunk before advancing the reader.
     public async IAsyncEnumerable<ReadOnlyMemory<byte>> ReadRawAsync(
         Stream stream,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         using var idle = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, cancellation.Token);
-        var buffer = new byte[16 * 1024];
-        while (true)
+        var buffer = ArrayPool<byte>.Shared.Rent(16 * 1024);
+        try
         {
-            idle.CancelAfter(ReadIdleTimeout);
-            int count;
-            try { count = await stream.ReadAsync(buffer, idle.Token); }
-            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && !cancellation.IsCancellationRequested)
+            while (true)
             {
-                throw new TimeoutException("Upstream body read idle timeout.");
+                idle.CancelAfter(ReadIdleTimeout);
+                int count;
+                try { count = await stream.ReadAsync(buffer.AsMemory(0, 16 * 1024), idle.Token); }
+                catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && !cancellation.IsCancellationRequested)
+                {
+                    throw new TimeoutException("Upstream body read idle timeout.");
+                }
+                finally { idle.CancelAfter(Timeout.InfiniteTimeSpan); }
+                if (count == 0) yield break;
+                yield return buffer.AsMemory(0, count);
             }
-            finally { idle.CancelAfter(Timeout.InfiniteTimeSpan); }
-            if (count == 0) yield break;
-            yield return buffer.AsMemory(0, count).ToArray();
         }
+        finally { ArrayPool<byte>.Shared.Return(buffer, clearArray: true); }
     }
 
     public void Dispose()

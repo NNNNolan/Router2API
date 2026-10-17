@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Runtime.CompilerServices;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -64,6 +65,7 @@ public sealed class ModelCatalog(
 {
     private static readonly TimeSpan ModelQueryTimeout = TimeSpan.FromSeconds(45);
     private readonly ConcurrentDictionary<string, CacheSlot> _cache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConditionalWeakTable<IPlatformTerminal, SemaphoreSlim> _queries = new();
 
     public async Task<IReadOnlyList<ModelDescriptor>> ListAsync(CancellationToken cancellationToken = default)
     {
@@ -110,17 +112,30 @@ public sealed class ModelCatalog(
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, deadline.Token);
         try
         {
-            using var client = transport.CreateClient(null, new PluginHttpClientOptions
+            var token = timeout.Token;
+            var gate = _queries.GetValue(registration.Terminal, static _ => new SemaphoreSlim(1, 1));
+            await gate.WaitAsync(token);
+            // A plugin can block before returning its Task. Keep at most one worker per
+            // terminal, including after a caller times out; the worker owns its client.
+            var query = Task.Run(async () =>
             {
-                AllowAutoRedirect = true,
-                RequestTimeout = TimeSpan.FromSeconds(45)
+                try
+                {
+                    token.ThrowIfCancellationRequested();
+                    using var client = transport.CreateClient(null, new PluginHttpClientOptions
+                    {
+                        AllowAutoRedirect = true,
+                        RequestTimeout = ModelQueryTimeout
+                    });
+                    client.DefaultRequestHeaders.UserAgent.ParseAdd("Router2API/1.0 model-discovery");
+                    return await registration.Terminal.GetModelsAsync(
+                        new ModelQueryContext(HttpClient: client, ForceRefresh: forceRefresh), token);
+                }
+                finally { gate.Release(); }
             });
-            client.DefaultRequestHeaders.UserAgent.ParseAdd("Router2API/1.0 model-discovery");
-            var query = registration.Terminal.GetModelsAsync(
-                new ModelQueryContext(HttpClient: client, ForceRefresh: forceRefresh), timeout.Token);
             // 即使插件返回的异步任务忽略取消，也只等待到截止时间；TrackedTerminal 仍跟踪其真实退出。
-            var models = await query.WaitAsync(timeout.Token);
-            timeout.Token.ThrowIfCancellationRequested();
+            var models = await query.WaitAsync(token);
+            token.ThrowIfCancellationRequested();
             // Invalidation removes the slot. A late result from an old generation cannot republish it.
             if (registration.ModelCacheTtl > TimeSpan.Zero)
                 Volatile.Write(ref slot.Value, new CacheEntry(registration.Terminal, models, DateTimeOffset.UtcNow.Add(registration.ModelCacheTtl)));

@@ -519,6 +519,7 @@ public sealed class PluginAttemptExecutor(
                 .OrderBy(item => item.PreferredExpiry ?? DateTimeOffset.MaxValue).ThenByDescending(item => item.Weight)
                 .ThenBy(_ => Random.Shared.Next()).Select(item => byId[item.AccountId]).ToArray();
         }
+        if (policy.PreferredExpirySelector is null && policy.WeightSelector is null) return candidates;
         return candidates.OrderBy(present => policy.PreferredExpirySelector?.Invoke(present) ?? DateTimeOffset.MaxValue)
             .ThenByDescending(present => policy.WeightSelector?.Invoke(present, request) ?? 0)
             .ThenBy(_ => policy.WeightSelector is null && policy.PreferredExpirySelector is null ? 0 : Random.Shared.Next()).ToArray();

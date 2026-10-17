@@ -11,6 +11,8 @@ public sealed class SqlSugarDatabase
     private readonly string _connectionString;
     private readonly ILogger<SqlSugarDatabase> _logger;
     private readonly SqlSugarRedisCache? _cache;
+    private readonly Action<SqlSugarClient> _configureClient;
+    private readonly Action<string, SugarParameter[]> _logExecuting;
 
     public SqlSugarDatabase(
         IOptions<DatabaseOptions> options,
@@ -25,6 +27,8 @@ public sealed class SqlSugarDatabase
         Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
         _connectionString = $"DataSource={fullPath}";
         _logger = logger;
+        _configureClient = ConfigureClient;
+        _logExecuting = LogExecuting;
         if (redis is { IsConfigured: true })
             _cache = new SqlSugarRedisCache(redis, logger);
     }
@@ -52,11 +56,15 @@ public sealed class SqlSugarDatabase
             };
         }
 
-        return new SqlSugarClient(config, db =>
-        {
-            db.Aop.OnLogExecuting = (sql, parameters) =>
-                _logger.LogDebug("sql={Sql} parameters={Parameters}", sql, parameters);
-        });
+        return new SqlSugarClient(config, _configureClient);
+    }
+
+    private void ConfigureClient(SqlSugarClient db) => db.Aop.OnLogExecuting = _logExecuting;
+
+    private void LogExecuting(string sql, SugarParameter[] parameters)
+    {
+        if (_logger.IsEnabled(LogLevel.Debug))
+            _logger.LogDebug("sql={Sql} parameters={Parameters}", sql, parameters);
     }
 
     public bool FactCacheEnabled => _cache is not null;

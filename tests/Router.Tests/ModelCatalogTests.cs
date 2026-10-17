@@ -34,7 +34,7 @@ public sealed class ModelCatalogTests
                 client = context.HttpClient;
                 entered.TrySetResult();
                 // 复现发生在返回 Task 之前的同步数据库/缓存等待，而非普通异步延迟。
-                // release.Wait(TimeSpan.FromSeconds(10));
+                release.Wait(TimeSpan.FromSeconds(10), CancellationToken.None);
                 finished.TrySetResult();
                 return Task.FromResult<IReadOnlyList<ModelDescriptor>>([new("late", "Late")]);
             });

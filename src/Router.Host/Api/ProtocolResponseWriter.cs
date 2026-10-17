@@ -139,6 +139,7 @@ internal static class ProtocolResponseWriter
         }
 
         PrepareStream(context, response.StatusCode);
+        using var writer = new SseJsonWriter(context.Response);
         var id = $"cmpl-{Guid.NewGuid():N}";
         var created = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
         await foreach (var chunk in response.Stream.WithCancellation(cancellationToken))
@@ -167,10 +168,7 @@ internal static class ProtocolResponseWriter
                 },
                 usage = OpenAiUsage(chunk.Usage)
             };
-            await context.Response.WriteAsync(
-                $"data: {JsonSerializer.Serialize(payload)}\n\n",
-                cancellationToken);
-            await context.Response.Body.FlushAsync(cancellationToken);
+            await writer.WriteAsync(payload, cancellationToken);
         }
 
         await WriteDoneAsync(context, cancellationToken);
@@ -242,6 +240,7 @@ internal static class ProtocolResponseWriter
         CancellationToken cancellationToken)
     {
         PrepareStream(context, response.StatusCode);
+        using var writer = new SseJsonWriter(context.Response);
         var id = $"resp_{Guid.NewGuid():N}";
         var output = new SortedDictionary<int, object>();
         var tools = new SortedDictionary<int, ResponsesToolState>();
@@ -263,7 +262,7 @@ internal static class ProtocolResponseWriter
         {
             payload["type"] = eventName;
             payload["sequence_number"] = sequence++;
-            await WriteEventAsync(context, eventName, payload, cancellationToken);
+            await WriteEventAsync(writer, eventName, payload, cancellationToken);
         }
 
         Dictionary<string, object?> Response(
@@ -565,6 +564,7 @@ internal static class ProtocolResponseWriter
         CancellationToken cancellationToken)
     {
         PrepareStream(context, response.StatusCode);
+        using var writer = new SseJsonWriter(context.Response);
         var id = $"msg_{Guid.NewGuid():N}";
         Usage? usage = null;
         var nextBlockIndex = 0;
@@ -573,7 +573,7 @@ internal static class ProtocolResponseWriter
         var finishReason = "stop";
         var tools = new SortedDictionary<int, AnthropicToolState>();
 
-        await WriteEventAsync(context, "message_start", new
+        await WriteEventAsync(writer, "message_start", new
         {
             type = "message_start",
             message = new
@@ -604,14 +604,14 @@ internal static class ProtocolResponseWriter
         async Task CloseTextBlockAsync()
         {
             if (textBlockIndex is not { } index) return;
-            await WriteEventAsync(context, "content_block_stop", new { type = "content_block_stop", index }, cancellationToken);
+            await WriteEventAsync(writer, "content_block_stop", new { type = "content_block_stop", index }, cancellationToken);
             textBlockIndex = null;
         }
 
         async Task CloseReasoningBlockAsync()
         {
             if (reasoningBlockIndex is not { } index) return;
-            await WriteEventAsync(context, "content_block_stop", new { type = "content_block_stop", index }, cancellationToken);
+            await WriteEventAsync(writer, "content_block_stop", new { type = "content_block_stop", index }, cancellationToken);
             reasoningBlockIndex = null;
         }
 
@@ -620,7 +620,7 @@ internal static class ProtocolResponseWriter
             if (textBlockIndex is not null) return;
             await CloseReasoningBlockAsync();
             textBlockIndex = nextBlockIndex++;
-            await WriteEventAsync(context, "content_block_start", new
+            await WriteEventAsync(writer, "content_block_start", new
             {
                 type = "content_block_start",
                 index = textBlockIndex.Value,
@@ -633,7 +633,7 @@ internal static class ProtocolResponseWriter
             if (reasoningBlockIndex is not null) return;
             await CloseTextBlockAsync();
             reasoningBlockIndex = nextBlockIndex++;
-            await WriteEventAsync(context, "content_block_start", new
+            await WriteEventAsync(writer, "content_block_start", new
             {
                 type = "content_block_start",
                 index = reasoningBlockIndex.Value,
@@ -649,7 +649,7 @@ internal static class ProtocolResponseWriter
             {
                 await CloseTextBlockAsync();
                 await CloseReasoningBlockAsync();
-                await WriteEventAsync(context, "error", ProtocolApiErrors.Anthropic(new AdapterResponse
+                await WriteEventAsync(writer, "error", ProtocolApiErrors.Anthropic(new AdapterResponse
                 {
                     StatusCode = StatusCodes.Status502BadGateway,
                     Error = error,
@@ -661,7 +661,7 @@ internal static class ProtocolResponseWriter
             if (!string.IsNullOrEmpty(chunk.Delta))
             {
                 await StartTextBlockAsync();
-                await WriteEventAsync(context, "content_block_delta", new
+                await WriteEventAsync(writer, "content_block_delta", new
                 {
                     type = "content_block_delta",
                     index = textBlockIndex!.Value,
@@ -672,7 +672,7 @@ internal static class ProtocolResponseWriter
             if (!string.IsNullOrEmpty(chunk.ReasoningDelta))
             {
                 await StartReasoningBlockAsync();
-                await WriteEventAsync(context, "content_block_delta", new
+                await WriteEventAsync(writer, "content_block_delta", new
                 {
                     type = "content_block_delta",
                     index = reasoningBlockIndex!.Value,
@@ -682,7 +682,7 @@ internal static class ProtocolResponseWriter
             if (!string.IsNullOrEmpty(chunk.ReasoningSignature))
             {
                 await StartReasoningBlockAsync();
-                await WriteEventAsync(context, "content_block_delta", new
+                await WriteEventAsync(writer, "content_block_delta", new
                 {
                     type = "content_block_delta",
                     index = reasoningBlockIndex!.Value,
@@ -707,14 +707,14 @@ internal static class ProtocolResponseWriter
                     await CloseReasoningBlockAsync();
                     tool.Started = true;
                     tool.BlockIndex = nextBlockIndex++;
-                    await WriteEventAsync(context, "content_block_start", new
+                    await WriteEventAsync(writer, "content_block_start", new
                     {
                         type = "content_block_start",
                         index = tool.BlockIndex,
                         content_block = new { type = "tool_use", id = tool.Id, name = tool.Name, input = new { } }
                     }, cancellationToken);
                     if (tool.Arguments.Length > 0)
-                        await WriteEventAsync(context, "content_block_delta", new
+                        await WriteEventAsync(writer, "content_block_delta", new
                         {
                             type = "content_block_delta",
                             index = tool.BlockIndex,
@@ -724,7 +724,7 @@ internal static class ProtocolResponseWriter
                 if (string.IsNullOrEmpty(delta.Arguments)) continue;
                 tool.Arguments.Append(delta.Arguments);
                 if (tool.Started)
-                    await WriteEventAsync(context, "content_block_delta", new
+                    await WriteEventAsync(writer, "content_block_delta", new
                     {
                         type = "content_block_delta",
                         index = tool.BlockIndex,
@@ -736,8 +736,8 @@ internal static class ProtocolResponseWriter
         await CloseTextBlockAsync();
         await CloseReasoningBlockAsync();
         foreach (var tool in tools.Values.Where(tool => tool.Started))
-            await WriteEventAsync(context, "content_block_stop", new { type = "content_block_stop", index = tool.BlockIndex }, cancellationToken);
-        await WriteEventAsync(context, "message_delta", new
+            await WriteEventAsync(writer, "content_block_stop", new { type = "content_block_stop", index = tool.BlockIndex }, cancellationToken);
+        await WriteEventAsync(writer, "message_delta", new
         {
             type = "message_delta",
             delta = new { stop_reason = MapAnthropicStopReason(finishReason, tools.Values.Any(tool => tool.Started)), stop_sequence = (string?)null },
@@ -747,7 +747,7 @@ internal static class ProtocolResponseWriter
                 output_tokens = usage?.CompletionTokens ?? 0
             }
         }, cancellationToken);
-        await WriteEventAsync(context, "message_stop", new { type = "message_stop" }, cancellationToken);
+        await WriteEventAsync(writer, "message_stop", new { type = "message_stop" }, cancellationToken);
     }
 
     internal static async Task WriteHeartbeatAsync(HttpContext context, CancellationToken cancellationToken)
@@ -769,10 +769,11 @@ internal static class ProtocolResponseWriter
     /// 不改动透传内容；调用方在标记之后断开时，宿主据此把请求记为已完成而不是取消。
     /// 没有已知结束标记的协议返回 null，维持原有取消判定。
     /// </summary>
-    private sealed class RawCompletionScan(byte[] marker)
+    internal sealed class RawCompletionScan(byte[] marker)
     {
         private readonly byte[] _marker = marker;
-        private byte[] _keep = [];
+        private readonly byte[] _keep = new byte[marker.Length - 1];
+        private int _kept;
         private bool _seen;
 
         /// <summary>按当前端点取协议结束标记；如今只覆盖宿主自己也会生成的 SSE 结束帧。</summary>
@@ -788,15 +789,23 @@ internal static class ProtocolResponseWriter
         public bool Feed(ReadOnlySpan<byte> bytes)
         {
             if (_seen) return false;
-            // 保留整个已接收流的尾部，支持标记分散在任意多个小块中。
-            var window = new byte[_keep.Length + bytes.Length];
-            _keep.CopyTo(window, 0);
-            bytes.CopyTo(window.AsSpan(_keep.Length));
-            var hit = window.AsSpan().IndexOf(_marker) >= 0;
-            var keep = Math.Min(_marker.Length - 1, window.Length);
-            _keep = window[^keep..];
-            _seen = hit;
-            return hit;
+            // Markers are fixed protocol literals (at most 25 bytes). Only the
+            // boundary needs copying; scanning a large chunk never copies its body.
+            Span<byte> boundary = stackalloc byte[2 * _marker.Length];
+            _keep.AsSpan(0, _kept).CopyTo(boundary);
+            var prefix = bytes[..Math.Min(bytes.Length, _marker.Length - 1)];
+            prefix.CopyTo(boundary[_kept..]);
+            if (bytes.IndexOf(_marker) >= 0 || boundary[..(_kept + prefix.Length)].IndexOf(_marker) >= 0)
+            {
+                _seen = true;
+                return true;
+            }
+            var retained = Math.Min(_kept, Math.Max(0, _keep.Length - bytes.Length));
+            _keep.AsSpan(_kept - retained, retained).CopyTo(_keep);
+            var suffix = bytes[^Math.Min(bytes.Length, _keep.Length)..];
+            suffix.CopyTo(_keep.AsSpan(retained));
+            _kept = retained + suffix.Length;
+            return false;
         }
     }
 
@@ -812,18 +821,12 @@ internal static class ProtocolResponseWriter
                 _ => "end_turn"
             };
 
-    private static async Task WriteEventAsync(
-        HttpContext context,
+    private static ValueTask WriteEventAsync(
+        SseJsonWriter writer,
         string eventName,
         object payload,
         CancellationToken cancellationToken)
-    {
-        await context.Response.WriteAsync(
-            $"event: {eventName}\ndata: {JsonSerializer.Serialize(payload)}\n\n",
-            cancellationToken);
-        await context.Response.Body.FlushAsync(cancellationToken);
-    }
-
+        => writer.WriteAsync(payload, cancellationToken, eventName);
     private static async Task WriteDoneAsync(HttpContext context, CancellationToken cancellationToken)
     {
         await context.Response.WriteAsync("data: [DONE]\n\n", cancellationToken);

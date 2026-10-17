@@ -10,6 +10,17 @@ namespace Router.Tests;
 public sealed class RequestParserTests
 {
     [TestMethod]
+    public void ExtensionsRemainValidAfterTheInputDocumentIsDisposed()
+    {
+        AdapterRequest request;
+        using (var document = JsonDocument.Parse("""{"model":"probe","messages":[],"metadata":{"number":9007199254740993}}"""))
+            request = RequestParser.Parse(document.RootElement);
+        var metadata = (JsonElement)request.Extensions["metadata"]!;
+        metadata.GetProperty("number").GetInt64().Should().Be(9007199254740993);
+        request.OriginalBody!.Value.GetProperty("metadata").GetRawText().Should().Be(metadata.GetRawText());
+    }
+
+    [TestMethod]
     public void ChatRequestPreservesLegacyPromptToolsAndToolChoice()
     {
         using var document = JsonDocument.Parse("""

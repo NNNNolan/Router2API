@@ -11,6 +11,7 @@ namespace Router.Infrastructure.Services;
 public sealed class ProxyTransportFactory : IDisposable
 {
     private static readonly TimeSpan IdleLifetime = TimeSpan.FromMinutes(2);
+    private static readonly PluginHttpClientOptions DefaultOptions = new();
     private readonly object _gate = new();
     private readonly Dictionary<TransportKey, Entry> _entries = [];
     private bool _disposed;
@@ -22,7 +23,7 @@ public sealed class ProxyTransportFactory : IDisposable
     /// <returns>持有连接池租约的客户端。</returns>
     public HttpClient CreateClient(ProxyEndpoint? proxy, PluginHttpClientOptions? options = null)
     {
-        options ??= new PluginHttpClientOptions();
+        options ??= DefaultOptions;
         ValidateTimeout(options.RequestTimeout);
         if (proxy is not null)
         {
@@ -34,29 +35,47 @@ public sealed class ProxyTransportFactory : IDisposable
         // Copy connection settings: a mutable ProxyEndpoint must not change a SOCKS callback after publication.
         var key = new TransportKey(proxy?.Id, proxy?.ConfigurationVersion ?? 0, proxy?.Scheme ?? ProxyScheme.Http,
             proxy?.Host, proxy?.Port ?? 0, proxy?.Username, proxy?.Password, options.AllowAutoRedirect);
+        Entry entry;
         lock (_gate)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
             var now = DateTimeOffset.UtcNow;
             // ponytail: sweep on acquisition, not on a timer; an idle host retains at most its last working set.
-            foreach (var pair in _entries.Where(pair => pair.Value.Clients == 0
+            List<TransportKey>? expired = null;
+            foreach (var pair in _entries)
+            {
+                if (pair.Value.Clients == 0
                 && (now - pair.Value.LastUsed >= IdleLifetime
                     || pair.Key.ProxyId == key.ProxyId && pair.Key != key
-                        && pair.Key.AllowAutoRedirect == key.AllowAutoRedirect)).ToArray())
-            {
-                pair.Value.Dispose();
-                _entries.Remove(pair.Key);
+                        && pair.Key.AllowAutoRedirect == key.AllowAutoRedirect))
+                    (expired ??= []).Add(pair.Key);
             }
-            if (!_entries.TryGetValue(key, out var entry))
+            if (expired is not null)
+            {
+                foreach (var expiredKey in expired)
+                {
+                    _entries[expiredKey].Dispose();
+                    _entries.Remove(expiredKey);
+                }
+            }
+            if (!_entries.TryGetValue(key, out entry!))
             {
                 entry = new Entry(CreateHandler(key));
                 _entries.Add(key, entry);
             }
             entry.Clients++;
-            return new HttpClient(new ClientLeaseHandler(entry.Sender, () => Release(entry)), disposeHandler: true)
+        }
+        try
+        {
+            return new HttpClient(new ClientLeaseHandler(this, entry), disposeHandler: true)
             {
                 Timeout = options.RequestTimeout
             };
+        }
+        catch
+        {
+            Release(entry);
+            throw;
         }
     }
 
@@ -138,16 +157,16 @@ public sealed class ProxyTransportFactory : IDisposable
         public void Dispose() => Sender.Dispose();
     }
 
-    private sealed class ClientLeaseHandler(HttpMessageInvoker sender, Action release) : HttpMessageHandler
+    private sealed class ClientLeaseHandler(ProxyTransportFactory owner, Entry entry) : HttpMessageHandler
     {
         private int _disposed;
         protected override HttpResponseMessage Send(HttpRequestMessage request, CancellationToken cancellationToken)
-            => sender.Send(request, cancellationToken);
+            => entry.Sender.Send(request, cancellationToken);
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-            => sender.SendAsync(request, cancellationToken);
+            => entry.Sender.SendAsync(request, cancellationToken);
         protected override void Dispose(bool disposing)
         {
-            if (disposing && Interlocked.Exchange(ref _disposed, 1) == 0) release();
+            if (disposing && Interlocked.Exchange(ref _disposed, 1) == 0) owner.Release(entry);
             base.Dispose(disposing);
         }
     }
