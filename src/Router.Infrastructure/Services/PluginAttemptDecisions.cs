@@ -14,7 +14,7 @@ internal static class PluginAttemptDecisions
         attempt.Decision?.Validate();
         if (result.Response.IsSuccess)
             return new PluginAttemptDecision { ReasonCode = "success" }.ToResult(attempt.StatusCode, attempt.Reason);
-        // Never accept a script/DLL flag as evidence of a failed host transport.
+        // 不能把脚本或 DLL 自报的标记当作宿主传输失败的证据。
         attempt = attempt with { IsTransportFailure = attempt.IsTransportFailure && transportFailure };
         var decision = attempt.Decision ?? MapLegacy(attempt, policy, accountPolicy);
         decision.Validate();
@@ -22,7 +22,7 @@ internal static class PluginAttemptDecisions
             decision = decision with { FailureKind = PluginFailureKind.Plugin };
         if (!proxyFault)
             decision = decision with { ProxyAction = PluginProxyAction.None };
-        // Ownership has moved to the consumer. Never throw away or replay a returned stream.
+        // 资源所有权已移交消费端，不能丢弃或重放已经返回的流。
         if (PluginResponseLifetime.HasStream(result.Response))
             decision = decision with { Retry = PluginRetryAction.None };
         return decision.ToResult(attempt.StatusCode, attempt.Reason);

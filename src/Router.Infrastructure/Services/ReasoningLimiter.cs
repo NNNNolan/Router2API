@@ -82,7 +82,7 @@ internal static class ReasoningLimiter
             var rank = KnownRank(NormalizeEffort(levels[index]));
             if (rank < 0) continue;
             var distance = Math.Abs(rank - requestedRank);
-            // Equal distance prefers the lower effort, then the original order.
+            // 距离相同时优先选择较低的推理等级，其次保留原始顺序。
             if (distance < bestDistance || distance == bestDistance && rank <= requestedRank && bestRank > requestedRank)
             {
                 bestIndex = index;

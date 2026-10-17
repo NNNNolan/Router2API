@@ -33,7 +33,7 @@ function clearRememberedCredentials() {
     localStorage.removeItem(rememberedUsernameKey)
     localStorage.removeItem(rememberedPasswordKey)
   } catch {
-    // Login should still work when browser storage is unavailable.
+    // 浏览器存储不可用时，仍应允许正常登录。
   }
 }
 function setRememberAccount(checked: boolean) {
@@ -56,7 +56,7 @@ async function submit() {
     }
   } catch {
     clearRememberedCredentials()
-    // Login should still work when browser storage is unavailable.
+    // 浏览器存储不可用时，仍应允许正常登录。
   }
   submitting.value = true
   try {

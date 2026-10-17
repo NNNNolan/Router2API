@@ -115,8 +115,8 @@ public sealed class ModelCatalog(
             var token = timeout.Token;
             var gate = _queries.GetValue(registration.Terminal, static _ => new SemaphoreSlim(1, 1));
             await gate.WaitAsync(token);
-            // A plugin can block before returning its Task. Keep at most one worker per
-            // terminal, including after a caller times out; the worker owns its client.
+            // 插件可能在返回 Task 前同步阻塞，因此每个终端最多保留一个执行任务，
+            // 调用方超时后也不例外；客户端由实际执行的任务持有。
             var query = Task.Run(async () =>
             {
                 try
@@ -136,7 +136,7 @@ public sealed class ModelCatalog(
             // 即使插件返回的异步任务忽略取消，也只等待到截止时间；TrackedTerminal 仍跟踪其真实退出。
             var models = await query.WaitAsync(token);
             token.ThrowIfCancellationRequested();
-            // Invalidation removes the slot. A late result from an old generation cannot republish it.
+            // 失效时会移除缓存槽，旧版本迟到的查询结果不能重新写入当前缓存。
             if (registration.ModelCacheTtl > TimeSpan.Zero)
                 Volatile.Write(ref slot.Value, new CacheEntry(registration.Terminal, models, DateTimeOffset.UtcNow.Add(registration.ModelCacheTtl)));
             return models;

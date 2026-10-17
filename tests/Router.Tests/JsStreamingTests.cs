@@ -32,8 +32,8 @@ public sealed class JsStreamingTests
         }
         var perFrame = (GC.GetAllocatedBytesForCurrentThread() - before) / 128.0;
         TestContext.WriteLine($"Jint SSE + mapper + standard chunk: {perFrame:F1} B/frame");
-        // Includes Jint JSON.parse/stringify of the complete canonical chunk;
-        // this is a regression ceiling for this fixture, not a zero-allocation claim.
+        // 包含完整标准数据块在 Jint 中的 JSON.parse 和 JSON.stringify 开销；
+        // 这是当前夹具的分配回归上限，不代表零分配。
         perFrame.Should().BeLessThanOrEqualTo(36 * 1024);
     }
 

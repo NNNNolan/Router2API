@@ -107,12 +107,12 @@ public sealed class AccountService(
             db.Insertable(entity).ExecuteCommand();
         account.CredentialVersion = entity.CredentialVersion;
 
-        // Re-enabling/re-authorizing an account must also reconcile its fast cooldown marker.
-        // Plugins must not know or manipulate host Redis keys.
+        // 重新启用或授权账号时，必须同步清理其快速冷却标记。
+        // 插件不应获知或操作宿主内部的 Redis 键。
         if (account.Status.CooldownUntil is null && shortTermState.IsConfigured)
         {
             try { await shortTermState.RemoveAsync(AccountCooldownKey(account.PluginKey, account.Id), cancellationToken); }
-            catch when (!cancellationToken.IsCancellationRequested) { /* Durable account state remains authoritative. */ }
+            catch when (!cancellationToken.IsCancellationRequested) { /* 仍以持久化的账号状态为准。 */ }
         }
         return account;
     }
@@ -192,7 +192,7 @@ public sealed class AccountService(
         var ttl = until - DateTimeOffset.UtcNow;
         if (ttl <= TimeSpan.Zero) return;
 
-        // The fast marker is best effort; the database update remains the durable source of truth.
+        // 快速标记仅尽力写入，数据库中的持久化状态仍是事实来源。
         try
         {
             await shortTermState.SetExpiryIfLaterAsync(

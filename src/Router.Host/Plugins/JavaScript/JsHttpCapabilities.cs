@@ -166,7 +166,7 @@ internal sealed class JsHttpCapabilities(JsPluginManifest manifest, IPluginServi
                             stripHeaders = true;
                         }
                         uri = next;
-                        continue; // Dispose the previous response/request/client before the next hop.
+                        continue; // 进入下一跳前，先释放上一跳的响应、请求和客户端。
                     }
                     var source = new JsHttpSource(response, ownedClient, ownedRequest, timeout,
                         spec.ReadIdleTimeoutMs is { } idle ? TimeSpan.FromMilliseconds(idle) : host.Execution.ReadIdleTimeout);
@@ -263,7 +263,7 @@ internal sealed class JsHttpCapabilities(JsPluginManifest manifest, IPluginServi
         if (options.Remove.Length + options.Set.Count > 128) throw new InvalidOperationException("Too many original JSON edits.");
         foreach (var key in options.Remove) body.Remove(key);
         foreach (var (key, value) in options.Set) body[key] = JsonNode.Parse(value.GetRawText());
-        return body.ToJsonString(); // JsonElement-backed untouched numbers keep their original precision.
+        return body.ToJsonString(); // 未修改的数字由 JsonElement 保留原始精度。
     }
     private void RequireRoute(string route)
     {

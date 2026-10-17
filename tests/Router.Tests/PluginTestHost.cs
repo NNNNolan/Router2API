@@ -22,7 +22,7 @@ internal static class PluginTestHost
         var host = new Mock<IPluginHost>(MockBehavior.Strict);
         host.SetupGet(value => value.PluginKey).Returns(key);
         host.SetupGet(value => value.Services).Returns(capabilities.Object);
-        // Deliberately no service-locator setup: both runtimes must use typed capabilities.
+        // 此处刻意不配置服务定位器：两种运行时都必须使用类型化宿主能力。
         return host.Object;
     }
 }

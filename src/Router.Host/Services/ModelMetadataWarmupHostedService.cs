@@ -28,7 +28,7 @@ public sealed class ModelMetadataWarmupHostedService(
             }
             catch (Exception exception)
             {
-                // Model metadata is advisory. The next scheduled or manual refresh can retry.
+                // 模型元数据仅作辅助，可在下次定时或手动刷新时重试。
                 logger.LogWarning(exception, "model metadata warmup failed; a retry is scheduled");
             }
 

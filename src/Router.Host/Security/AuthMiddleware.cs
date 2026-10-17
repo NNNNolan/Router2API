@@ -99,8 +99,8 @@ public sealed class DownstreamApiKeyMiddleware(
             return;
         }
 
-        // The admin test console may read the model catalog with its existing session.
-        // Other /v1 requests still require the downstream Bearer key.
+        // 管理员测试窗口可使用已有会话读取模型目录。
+        // 其他 /v1 请求仍需提供下游 Bearer 密钥。
         if (IsAdminModelCatalogRequest(context, adminAuth))
         {
             await next(context);

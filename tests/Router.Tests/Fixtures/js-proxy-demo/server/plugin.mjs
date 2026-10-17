@@ -21,7 +21,7 @@ export async function checkPool(ctx) {
     timeoutMs: 8000,
     retry: { maxRetries: 1, delayMs: 200 }
   });
-  // The HTTP factory does not interpret status codes. Business interpretation belongs here.
+  // HTTP 工厂不解释状态码，业务含义由此处判断。
   const snapshot = {
     statusCode: response.statusCode,
     checkedAt: new Date().toISOString(),

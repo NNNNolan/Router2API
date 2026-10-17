@@ -79,7 +79,7 @@ public sealed class PluginTransportTests
     {
         using var transport = new ProxyTransportFactory();
         using var resilience = new PluginResiliencePipelines();
-        // Port 0 is not selected, so explicitly direct requests use a closed loopback port instead.
+        // 不能直接选择端口 0，因此显式直连请求改用已经关闭的本机回环端口。
         using var listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0);
         listener.Start();
         var port = ((System.Net.IPEndPoint)listener.LocalEndpoint).Port;

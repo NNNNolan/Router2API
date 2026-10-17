@@ -17,7 +17,7 @@ public sealed class PluginHttpOriginStore(SqlSugarDatabase database)
     {
         origin = Normalize(origin);
         token.ThrowIfCancellationRequested();
-        // A stable compound primary key makes concurrent approvals idempotent.
+        // 使用稳定的复合主键，保证并发授权操作的幂等性。
         var id = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(pluginKey + "\0" + origin)));
         using var db = database.CreateClient();
         db.Ado.ExecuteCommand(

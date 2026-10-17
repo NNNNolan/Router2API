@@ -124,7 +124,7 @@ public sealed class RedisKeyValueStore : ISharedKeyValueStore, IDisposable
     public async Task<long> IncrementAsync(string key, long delta, TimeSpan ttl, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        // Return the stored string: Lua numbers lose precision above 2^53.
+        // 返回存储的原始字符串，避免 Lua 数值超过 2^53 后丢失精度。
         var result = await RequireClient().EvalAsync(
             "redis.call('INCRBY', KEYS[1], ARGV[1]); redis.call('PEXPIRE', KEYS[1], ARGV[2]); return redis.call('GET', KEYS[1])",
             Key(key), delta.ToString(System.Globalization.CultureInfo.InvariantCulture), Math.Max(1, (long)ttl.TotalMilliseconds));

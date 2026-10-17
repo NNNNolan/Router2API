@@ -131,7 +131,7 @@ internal sealed partial class JsPlatformTerminal : IPlatformTerminal, IPluginMod
             var decision = attempt.Decision ?? PreviewDecision(attempt);
             decision.Validate();
             attempt = decision.ToResult(attempt.StatusCode, attempt.Reason);
-            // Only native HTTP failures can establish a transport fault; arbitrary script flags cannot punish a proxy.
+            // 只有原生 HTTP 失败才能证明传输故障，不能根据脚本自报的标记处罚代理。
             attempt = attempt with { IsTransportFailure = false };
             var status = response["statusCode"]?.GetValue<int>() ?? 200;
             if (status is < 200 or > 599) throw new InvalidOperationException("Invalid response status.");
@@ -228,7 +228,7 @@ internal sealed partial class JsPlatformTerminal : IPlatformTerminal, IPluginMod
                 await _host.LogAsync(Manifest.Platform.Name, "js.invoke.failed", invocation?.Redact(exception.Message) ?? SafeError(exception, context.Account),
                     "Error", context.TraceId, cancellationToken: CancellationToken.None);
             }
-            catch { /* Logging cannot turn a script failure into a resource/transport failure. */ }
+            catch { /* 日志写入失败不能把脚本错误变成资源或传输故障。 */ }
             return Failure(502, invocation?.Redact(exception.Message) ?? SafeError(exception, context.Account), "plugin_execution_error");
         }
         finally
@@ -270,7 +270,7 @@ internal sealed partial class JsPlatformTerminal : IPlatformTerminal, IPluginMod
         foreach (var task in Manifest.Tasks)
             builder.Job(new PluginJobRegistration(task.Name, Manifest.Platform.Name, async context =>
             {
-                // Manual execution of a Cron task must use the same native task lock as the scheduler.
+                // 手动执行 Cron 任务时，必须与调度器使用同一套原生任务锁。
                 var succeeded = await _host.Tasks.RunAsync(task.Name, Manifest.Platform.Name, context.CancellationToken);
                 context.CancellationToken.ThrowIfCancellationRequested();
                 if (!succeeded) throw new InvalidOperationException("Scheduled task failed, is already running, or its task lock is unavailable.");
@@ -309,7 +309,7 @@ internal sealed partial class JsPlatformTerminal : IPlatformTerminal, IPluginMod
         AccountAction = attempt.Outcome == PluginAttemptOutcome.DisableAccount ? PluginAccountAction.Disable
             : attempt.Outcome == PluginAttemptOutcome.CooldownAccount ? PluginAccountAction.Cooldown : PluginAccountAction.None,
         AccountCooldownUntil = attempt.Outcome == PluginAttemptOutcome.CooldownAccount ? DateTimeOffset.UtcNow.AddMinutes(5) : null,
-        // The native executor still requires actual evidence before executing this request.
+        // 原生执行器仍需取得真实证据后，才会执行此项请求。
         ProxyAction = attempt.Outcome == PluginAttemptOutcome.CooldownNode ? PluginProxyAction.Cooldown : PluginProxyAction.None,
         ReasonCode = "js.preview"
     };

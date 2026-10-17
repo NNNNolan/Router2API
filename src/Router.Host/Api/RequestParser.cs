@@ -103,8 +103,8 @@ internal static class RequestParser
     {
         if (body.ValueKind != JsonValueKind.Object) return;
 
-        // Extensions share the already-owned snapshot, so disposing the input is safe
-        // without cloning every extension into another JsonDocument.
+        // 扩展字段共享请求已持有的正文快照，释放原始输入后仍可安全读取，
+        // 无需为每个扩展字段另行克隆 JsonDocument。
         foreach (var property in request.OriginalBody!.Value.EnumerateObject())
             if (!StructuralProperties.Contains(property.Name))
                 request.Extensions[property.Name] = property.Value;

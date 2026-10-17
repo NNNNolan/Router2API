@@ -53,7 +53,7 @@ internal sealed class DotNetPackageLoader(IPluginHostFactory hosts) : IPluginPac
                 var builder = new PluginBuilder();
                 var cache = type.GetCustomAttribute<ModelCacheAttribute>();
                 var ttl = cache?.Disabled == true ? TimeSpan.Zero : TimeSpan.FromSeconds(Math.Clamp(cache?.TtlSeconds ?? 300, 1, 86400));
-                // Add immediately: Configure, page and discovery can throw before StartAsync is entered.
+                // 立即登记终端：进入 StartAsync 前，配置、页面获取和发现过程都可能抛出异常。
                 created.Add(new LoadedPlatform(attribute!.Name, pluginKey, attribute.DisplayName, attribute.ProbeEndpoint,
                     terminal, host, builder, [], ttl));
                 if (terminal is IPluginModule module) module.Configure(builder);
@@ -71,7 +71,7 @@ internal sealed class DotNetPackageLoader(IPluginHostFactory hosts) : IPluginPac
         {
             package ??= new LoadedPlugin(name, "unknown", Runtime, created, [], null, loadContext.Unload);
             try { await package.DisposeAsync(); }
-            catch { /* Preserve the load error after attempting cleanup of every created terminal. */ }
+            catch { /* 尝试清理所有已创建的终端后，仍保留原始加载错误。 */ }
             throw;
         }
     }
@@ -187,7 +187,7 @@ internal sealed class DotNetPackageLoader(IPluginHostFactory hosts) : IPluginPac
         }
         catch (Exception exception) when (exception is IOException or XmlException or UnauthorizedAccessException)
         {
-            // XML documentation is optional; a malformed file must not prevent the plugin from loading.
+            // XML 文档是可选的，格式错误不能阻止插件加载。
         }
         return null;
     }

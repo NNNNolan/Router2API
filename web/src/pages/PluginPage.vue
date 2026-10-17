@@ -42,7 +42,7 @@ async function onMessage(event: MessageEvent) {
       body: event.data.body === undefined || event.data.body === null ? undefined : JSON.stringify(event.data.body)
     })
     const text = await body.text(); let payload: unknown = text
-    try { payload = text ? JSON.parse(text) : null } catch { /* HTML/text response */ }
+    try { payload = text ? JSON.parse(text) : null } catch { /* 响应为 HTML 或纯文本。 */ }
     if (!body.ok) throw new Error((payload as { error?: string } | null)?.error || `请求失败（${body.status}）`)
     respond(event, event.data.id, true, payload)
   } catch (error) { respond(event, event.data.id, false, null, error instanceof Error ? error.message : '请求失败') }
@@ -56,7 +56,7 @@ async function runTask(event: MessageEvent) {
     if (csrf) headers.set('X-CSRF-Token', decodeURIComponent(csrf))
     const body = await fetch(`/api/admin/plugins/${encodeURIComponent(pluginKey.value)}/tasks/${encodeURIComponent(task)}/run`, { method: 'POST', credentials: 'include', headers })
     const text = await body.text(); let payload: unknown = text
-    try { payload = text ? JSON.parse(text) : null } catch { /* empty/HTML response */ }
+    try { payload = text ? JSON.parse(text) : null } catch { /* 响应为空或为 HTML。 */ }
     if (!body.ok) throw new Error((payload as { error?: string } | null)?.error || `任务执行失败（${body.status}）`)
     respond(event, event.data.id, true, payload)
   } catch (error) { respond(event, event.data.id, false, null, error instanceof Error ? error.message : '任务执行失败') }

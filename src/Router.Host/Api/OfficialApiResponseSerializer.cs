@@ -10,7 +10,7 @@ using Router.Contracts.Domain;
 
 namespace Router.Host.Api;
 
-/// <summary>Serializes host-owned API response shapes and checks them with the official SDK models.</summary>
+/// <summary>序列化宿主管理的 API 响应结构，并使用官方 SDK 模型校验。</summary>
 internal static class OfficialApiResponseSerializer
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
@@ -49,7 +49,7 @@ internal static class OfficialApiResponseSerializer
     }
 }
 
-/// <summary>Maps internal plugin errors to the error envelope expected by each public protocol.</summary>
+/// <summary>将插件内部错误映射为各公开协议要求的错误响应结构。</summary>
 internal static class ProtocolApiErrors
 {
     public static object OpenAi(AdapterResponse response)

@@ -272,7 +272,7 @@ internal sealed record JsPluginPackage(JsPluginManifest Manifest, string Source,
         }
         catch (Exception exception) when (exception is IOException or JsonException or UnauthorizedAccessException or InvalidOperationException)
         {
-            return true; // Let the normal loader report a failed manifest without aborting other plugins.
+            return true; // 由常规加载流程报告清单错误，避免中断其他插件的加载。
         }
     }
 

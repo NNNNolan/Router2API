@@ -163,7 +163,7 @@ public sealed class ProxySubscriptionService(
                 }
                 catch (Exception exception) when (exception is not OperationCanceledException)
                 {
-                    // A probe failure is reflected in node quality and must not roll back the subscription refresh.
+                    // 探测失败通过节点质量状态体现，不能因此回滚订阅刷新。
                     probeErrors.Add(exception.Message);
                 }
                 finally

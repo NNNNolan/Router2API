@@ -187,7 +187,7 @@ public sealed class PluginJobManager(string pluginKey, IPluginLogSink logs) : IP
                 DetailsJson = JsonSerializer.Serialize(new { jobId = entry.Snapshot.Id, state = entry.Snapshot.State.ToString() })
             });
         }
-        catch { /* Job ownership cannot depend on diagnostic persistence. */ }
+        catch { /* 后台任务的所有权管理不能依赖诊断信息是否持久化成功。 */ }
     }
 
     private void Prune()

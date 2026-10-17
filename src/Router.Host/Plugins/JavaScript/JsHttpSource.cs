@@ -49,8 +49,8 @@ internal sealed class JsHttpSource(
         finally { Volatile.Write(ref _reading, 0); }
     }
 
-    // Chunks borrow the reader's buffer until the next MoveNextAsync/DisposeAsync.
-    // Every host consumer must finish writing a chunk before advancing the reader.
+    // 数据块借用读取器的缓冲区，有效期到下一次 MoveNextAsync 或 DisposeAsync。
+    // 宿主消费端必须等当前数据块写入完成后，才能继续推进读取器。
     public async IAsyncEnumerable<ReadOnlyMemory<byte>> ReadRawAsync(
         Stream stream,
         [EnumeratorCancellation] CancellationToken cancellationToken)

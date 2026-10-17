@@ -7,8 +7,8 @@ using Router.Infrastructure.Services;
 namespace Router.Host.Api;
 
 /// <summary>
-/// Converts the host's canonical adapter response back to the protocol used by
-/// the public endpoint. Plugins never need to know which v1 endpoint was used.
+/// 将宿主的标准适配响应转换为公开端点使用的协议。
+/// 插件无需关心调用方使用的是哪个 v1 端点。
 /// </summary>
 internal static class ProtocolResponseWriter
 {
@@ -789,8 +789,8 @@ internal static class ProtocolResponseWriter
         public bool Feed(ReadOnlySpan<byte> bytes)
         {
             if (_seen) return false;
-            // Markers are fixed protocol literals (at most 25 bytes). Only the
-            // boundary needs copying; scanning a large chunk never copies its body.
+            // 结束标记是固定的协议字节序列，最多 25 字节；只需复制分块边界，
+            // 扫描大数据块时不复制其正文。
             Span<byte> boundary = stackalloc byte[2 * _marker.Length];
             _keep.AsSpan(0, _kept).CopyTo(boundary);
             var prefix = bytes[..Math.Min(bytes.Length, _marker.Length - 1)];
@@ -991,8 +991,8 @@ internal static class ProtocolResponseWriter
             }
             catch (JsonException)
             {
-                // Ignore malformed extension tool metadata; the call can still
-                // be returned using the default function-call representation.
+                // 忽略格式错误的扩展工具元数据，仍可使用默认的函数调用结构
+                // 返回该工具调用。
             }
         }
         return result;

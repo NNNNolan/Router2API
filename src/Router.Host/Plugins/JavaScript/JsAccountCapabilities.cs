@@ -107,7 +107,7 @@ internal sealed class JsAccountCapabilities(JsPluginManifest manifest, IPluginSe
             throw new InvalidOperationException("Account platform cannot be changed.");
         if (patch.Status is { } status)
         {
-            _ = status.Deserialize<StatusInput>(AttemptJsonOptions); // Reject host-only fields such as InFlight.
+            _ = status.Deserialize<StatusInput>(AttemptJsonOptions); // 拒绝 InFlight 等仅供宿主管理的字段。
             if (status.ContainsKey("state") || status.ContainsKey("disabledUntil")) Require("disable");
             if (status.Any(pair => pair.Key is not ("state" or "disabledUntil"))) Require("setCooldown");
             if (status["state"] is { } state)

@@ -92,7 +92,7 @@ internal sealed class LoadedPlugin(
             {
                 try
                 {
-                    // Legacy module StopAsync owns its cleanup; don't dispose it a second time.
+                    // 旧版模块由 StopAsync 负责清理，不能再次调用 Dispose。
                     if (terminal is IPluginModule module && _started.Contains(module))
                         await module.StopAsync(CancellationToken.None);
                     else if (terminal is IAsyncDisposable asyncDisposable)

@@ -32,7 +32,7 @@ public sealed class ProxyTransportFactory : IDisposable
             if (proxy.Port is < 1 or > 65535 || !Enum.IsDefined(proxy.Scheme))
                 throw new ArgumentException("Invalid proxy transport settings.", nameof(proxy));
         }
-        // Copy connection settings: a mutable ProxyEndpoint must not change a SOCKS callback after publication.
+        // 复制连接配置，避免可变的 ProxyEndpoint 在发布后改变 SOCKS 回调使用的设置。
         var key = new TransportKey(proxy?.Id, proxy?.ConfigurationVersion ?? 0, proxy?.Scheme ?? ProxyScheme.Http,
             proxy?.Host, proxy?.Port ?? 0, proxy?.Username, proxy?.Password, options.AllowAutoRedirect);
         Entry entry;
@@ -40,7 +40,7 @@ public sealed class ProxyTransportFactory : IDisposable
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
             var now = DateTimeOffset.UtcNow;
-            // ponytail: sweep on acquisition, not on a timer; an idle host retains at most its last working set.
+            // ponytail: 获取客户端时才清理，不使用定时器；空闲宿主最多保留上次使用的连接集合。
             List<TransportKey>? expired = null;
             foreach (var pair in _entries)
             {
@@ -145,7 +145,7 @@ public sealed class ProxyTransportFactory : IDisposable
         }
     }
 
-    // Private: keys contain proxy credentials and must never be logged or projected to plugins.
+    // 仅供内部使用：键中包含代理凭据，禁止写入日志或向插件暴露。
     private readonly record struct TransportKey(string? ProxyId, long Version, ProxyScheme Scheme,
         string? Host, int Port, string? Username, string? Password, bool AllowAutoRedirect);
 

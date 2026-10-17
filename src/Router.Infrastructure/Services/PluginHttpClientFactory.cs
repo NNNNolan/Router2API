@@ -19,7 +19,7 @@ public readonly record struct ProxyClientKey(
 public sealed class ProxyHttpClientFactory(ProxyTransportFactory transport) : IProxyHttpClientFactory
 {
     private readonly ProxyTransportFactory _transport = transport ?? throw new ArgumentNullException(nameof(transport));
-    // Attempt clients also serve permission-checked JS. Redirects would bypass its origin allowlist.
+    // 尝试客户端也供经过权限检查的 JS 使用，自动重定向会绕过其来源白名单。
     private static readonly PluginHttpClientOptions LegacyOptions = new();
 
     public HttpClient CreateDirectClient(string clientName = "direct")

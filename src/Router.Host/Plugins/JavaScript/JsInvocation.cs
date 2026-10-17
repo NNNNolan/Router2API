@@ -296,7 +296,7 @@ internal sealed class JsInvocation : IAsyncDisposable
         List<Exception>? errors = null;
         try { await _operation.CancelAsync(); }
         catch (Exception exception) { (errors ??= []).Add(exception); }
-        // Cancellation must unwind any active Jint call before its engine/realm is disposed.
+        // 释放 Jint 引擎及其执行环境前，必须先通过取消让仍在执行的调用退出。
         await _engineGate.WaitAsync();
         try { await Task.WhenAll(_calls); }
         catch (Exception exception) { (errors ??= []).Add(exception); }

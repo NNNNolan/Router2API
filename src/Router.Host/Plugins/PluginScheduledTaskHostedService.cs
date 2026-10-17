@@ -56,9 +56,9 @@ public sealed class PluginScheduledTaskHostedService(
                         DateTimeOffset due;
                         try
                         {
-                            // A task should first run at its next Cron occurrence, not as soon as
-                            // the host starts. Scheduling all tasks immediately creates a burst
-                            // of database and network work during startup.
+                            // 任务应在下一次 Cron 计划时间首次执行，不能在宿主启动时立即执行。
+                            // 立即调度所有任务会在启动期间集中触发
+                            // 大量数据库和网络操作。
                             due = _nextRuns.GetOrAdd(key, _ => CronSchedule.GetNext(task.Cron, now));
                         }
                         catch (FormatException exception)

@@ -531,7 +531,7 @@ public sealed class PluginCatalog(
                 modelCatalog.Invalidate(registration.Name);
             }
             _plugins[pluginName] = runtime;
-            candidate = null; // Ownership moves only after validation, start and old-generation drain succeeded.
+            candidate = null; // 只有校验、启动和旧版本排空均成功后，才移交资源所有权。
             logger.LogInformation("plugin activated name={PluginName} version={Version} path={Path}", pluginName, runtime.Descriptor.Version, stagingDirectory);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
@@ -592,7 +592,7 @@ public sealed class PluginCatalog(
         try { if (Directory.Exists(target)) Directory.Delete(target, recursive: true); }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            // A collectible CLR assembly may remain mapped until GC; startup sweeps these snapshots.
+            // 可回收的 CLR 程序集可能到 GC 时才解除映射，启动时会清理这些快照。
             logger.LogDebug(exception, "plugin snapshot is still in use path={Path}", target);
         }
     }

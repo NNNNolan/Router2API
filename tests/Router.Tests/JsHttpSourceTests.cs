@@ -17,7 +17,7 @@ public sealed class JsHttpSourceTests
             var offset = 0;
             await foreach (var chunk in source.ReadRawAsync(stream, default))
             {
-                await Task.Yield(); // A pending downstream write must keep its borrowed bytes intact.
+                await Task.Yield(); // 等待下游写入期间，借用的数据块必须保持完整。
                 chunk.Span.SequenceEqual(bytes.AsSpan(offset, chunk.Length)).Should().BeTrue();
                 offset += chunk.Length;
             }

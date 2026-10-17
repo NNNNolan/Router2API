@@ -216,7 +216,7 @@ public sealed class PluginAttemptExecutor(
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            // Metadata lookup is advisory; an internal timeout must not block the model request.
+            // 元数据查询仅作辅助，内部超时不能阻止模型请求继续执行。
         }
         catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
         {
@@ -453,7 +453,7 @@ public sealed class PluginAttemptExecutor(
                 : await FilterAccountsAsync(pluginKey, platformName, [forced], request, overrides, accountPolicy, cancellationToken);
         }
 
-        // Priority/weight is global within the plugin platform, not just within the first eligible page.
+        // 优先级和权重应覆盖插件平台的全部账号，不能只考虑第一页可用账号。
         if (accountPolicy.PreferredExpirySelector is not null || accountPolicy.WeightSelector is not null || accountPolicy.BatchSelector is not null)
         {
             var all = await accounts.ListAsync(pluginKey, platformName, cancellationToken);
@@ -494,7 +494,7 @@ public sealed class PluginAttemptExecutor(
         if (candidates.Length == 0) return candidates;
         if (overrides?.SkipCooldown != true)
         {
-            // Complete the native hard filters before any script sees candidates.
+            // 先完成原生硬性过滤，再将候选账号交给脚本。
             var available = await Task.WhenAll(candidates.Select(async present =>
             {
                 try
@@ -545,10 +545,10 @@ public sealed class PluginAttemptExecutor(
             return candidates;
 
         var now = DateTimeOffset.UtcNow;
-        // Redis cooldown lookups are independent. Avoid serializing one HGETALL per proxy.
+        // 各代理的 Redis 冷却查询互不依赖，应并行执行，避免逐个串行查询 HGETALL。
         var available = await Task.WhenAll(candidates.Select(async proxy =>
         {
-            // Any Redis error escapes here: node state has no memory fallback.
+            // Redis 查询错误在此直接向上传播，节点状态不回退到内存。
             var state = await proxyPolicy.GetAsync(pluginKey, proxy, cancellationToken);
             return state?.State == ProxyPolicyState.Cooldown && state.CooldownUntil > now
                 ? null

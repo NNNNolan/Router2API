@@ -35,7 +35,7 @@ public sealed partial class PluginReleaseService(IHttpClientFactory clients, Plu
     public async Task<PluginRepository> AddRepositoryAsync(string owner, string repo, CancellationToken token)
     {
         ValidateRepository(owner, repo);
-        _ = await ReleasesAsync(owner, repo, token); // Also confirms that GitHub can see the repository.
+        _ = await ReleasesAsync(owner, repo, token); // 同时确认 GitHub 能够访问该仓库。
         await _gate.WaitAsync(token);
         try
         {

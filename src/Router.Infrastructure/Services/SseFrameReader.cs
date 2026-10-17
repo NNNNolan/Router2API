@@ -116,7 +116,7 @@ public static class SseFrameReader
                 {
                     line.GetSpan(1)[0] = character;
                     line.Advance(1);
-                    // UTF-8 needs at least one byte per UTF-16 code unit, so this also bounds partial lines.
+                    // UTF-8 所需字节数不少于 UTF-16 代码单元数，因此也能限制尚未读完的行。
                     if (line.WrittenCount > maxFrameBytes) throw new InvalidDataException("SSE line exceeds its size limit.");
                 }
             }

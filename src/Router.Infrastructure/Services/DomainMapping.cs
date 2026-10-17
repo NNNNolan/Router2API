@@ -256,7 +256,7 @@ internal static class CredentialCodec
         }
     }
 
-    // Compare legacy spellings without creating normalized strings.
+    // 兼容旧字段名的拼写方式，比较时不创建规范化字符串。
     internal static bool NameEquals(ReadOnlySpan<char> value, ReadOnlySpan<char> expected)
     {
         var index = 0;
@@ -303,7 +303,7 @@ internal static class CredentialCodec
 
     private static void SetFirst(ref JsonElement field, JsonElement value)
     {
-        // First matching property wins, including an explicit null.
+        // 以第一个匹配的属性为准，包括显式的 null 值。
         if (field.ValueKind == JsonValueKind.Undefined) field = value;
     }
 

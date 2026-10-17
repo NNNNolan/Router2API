@@ -2,7 +2,7 @@ using Microsoft.AspNetCore.Http;
 
 namespace Router.Host.Web;
 
-/// <summary>Collapses repeated identical Content-Type values before endpoint body binding.</summary>
+/// <summary>在端点绑定请求体前，合并重复且相同的 Content-Type 值。</summary>
 public sealed class NormalizeDuplicateContentTypeMiddleware(RequestDelegate next)
 {
     public async Task InvokeAsync(HttpContext context)
