@@ -122,9 +122,9 @@ function updatedAt(value: string) {
         <NCard v-for="model in pageModels" :key="model.id" :bordered="false" class="model-plaza-card">
           <div class="model-card-top">
             <NTag type="info" size="small" round>{{ model.platformName || model.platform }}</NTag>
-            <span class="model-card-id" :title="model.id">{{ model.id }}</span>
           </div>
           <h3 :title="model.displayName">{{ model.displayName }}</h3>
+          <p class="model-card-id" :title="model.id">{{ model.id }}</p>
           <div class="model-spec-grid">
             <div><span>上下文</span><strong>{{ formatLimit(model.contextWindow) }}</strong></div>
             <div><span>输入</span><strong>{{ formatLimit(model.inputLimit) }}</strong></div>

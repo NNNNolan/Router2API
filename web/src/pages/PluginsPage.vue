@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, h, ref, watch } from 'vue'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
-import { useMessage, NAlert, NButton, NCard, NCheckbox, NDataTable, NEmpty, NInput, NModal, NPopconfirm, NSelect, NSpin, NTabPane, NTabs, NTag } from 'naive-ui'
+import { useMessage, NAlert, NButton, NCard, NCheckbox, NDataTable, NEmpty, NIcon, NInput, NModal, NPopconfirm, NPopover, NSelect, NSpin, NTabPane, NTabs, NTag } from 'naive-ui'
+import { EllipsisHorizontalOutline } from '@vicons/ionicons5'
 import type { DataTableColumns } from 'naive-ui'
 import { api, type PluginDescriptor, type PluginReleaseIndex, type PluginReleaseSummary, type PluginTask } from '@/services/api'
 
@@ -211,24 +212,24 @@ function openSubscribe() {
 
 <template>
   <div class="plugin-manager">
-    <NCard :bordered="false" class="plugin-manager-head"><div class="plugin-manager-headline">
-      <div><span class="page-eyebrow">PLUGIN LIBRARY</span><h2>插件管理</h2><p>查看运行状态，按需安装和更新仓库中的插件。</p></div>
+    <div class="plugin-manager-head"><div class="plugin-manager-headline">
+      <div><h2>插件管理</h2><p>安装、更新和管理插件。<span v-if="pluginsQuery.isSuccess.value">当前已安装 {{ plugins.length }} 个。</span></p></div>
       <div class="plugin-manager-actions"><NButton secondary :loading="reloading" :disabled="uploading" @click="reload">重新加载</NButton><NButton secondary :disabled="uploading" @click="uploadError = ''; uploadModalOpen = true">上传插件 ZIP</NButton><NButton type="primary" @click="openSubscribe">添加订阅仓库</NButton></div>
-    </div></NCard>
+    </div></div>
     <NTabs v-model:value="tab" type="line" animated class="plugin-manager-tabs">
       <NTabPane name="installed" tab="已安装插件">
         <NSpin v-if="pluginsQuery.isPending.value" class="center-spin" />
         <NAlert v-else-if="pluginsQuery.isError.value" type="error">插件列表加载失败，请刷新重试。</NAlert>
         <NEmpty v-else-if="!plugins.length" description="尚未安装插件，可上传 ZIP 或从 GitHub 仓库选择安装" class="plugin-manager-empty" />
-        <div v-else class="plugin-card-grid"><NCard v-for="plugin in plugins" :key="plugin.pluginKey" class="plugin-card" :bordered="false">
+        <TransitionGroup v-else tag="div" name="plugin-list" class="plugin-card-grid"><NCard v-for="plugin in plugins" :key="plugin.pluginKey" class="plugin-card" :bordered="false">
           <div class="plugin-card-head"><div class="plugin-card-symbol">{{ plugin.runtime === 'jint' ? 'JS' : 'C#' }}</div><NTag :type="plugin.state === 'Active' ? 'success' : plugin.state === 'Failed' ? 'error' : 'default'" round>{{ plugin.state === 'Active' ? '运行中' : plugin.state === 'Disabled' ? '已禁用' : plugin.state === 'Draining' ? '正在停止' : '加载失败' }}</NTag></div>
           <h3>{{ plugin.name }}</h3><p class="plugin-card-description">{{ plugin.description || installedSource(plugin.pluginKey)?.description || '此插件尚未提供描述。' }}</p>
           <div class="plugin-card-meta"><span>{{ plugin.pluginKey }}</span><span>v{{ plugin.version }}</span></div>
           <div v-if="installedSource(plugin.pluginKey)" class="plugin-card-source">来源：{{ installedSource(plugin.pluginKey)?.owner }}/{{ installedSource(plugin.pluginKey)?.repo }} · {{ installedSource(plugin.pluginKey)?.tag }}</div>
           <div class="plugin-card-footer"><NButton v-if="plugin.tasks.length" text type="primary" @click="openTasks(plugin)">定时任务 · {{ plugin.tasks.length }}</NButton><span v-else class="plugin-card-muted">无定时任务</span>
-            <div class="plugin-card-buttons"><NButton v-if="updateFor(plugin.pluginKey)" size="small" text type="primary" @click="tab = 'updates'">有更新</NButton><NButton size="small" secondary :type="plugin.state === 'Active' ? 'warning' : 'success'" :loading="togglingKey === plugin.pluginKey" :disabled="plugin.state === 'Draining' || Boolean(deletingKey)" @click="togglePlugin(plugin)">{{ plugin.state === 'Active' ? '禁用' : '启用' }}</NButton><NPopconfirm @positive-click="deletePlugin(plugin.pluginKey)"><template #trigger><NButton size="small" secondary type="error" :loading="deletingKey === plugin.pluginKey" :disabled="plugin.state === 'Draining' || Boolean(togglingKey)">删除</NButton></template>确定删除 {{ plugin.name }} 的插件文件？</NPopconfirm></div>
+            <div class="plugin-card-buttons"><NButton v-if="updateFor(plugin.pluginKey)" size="small" text type="primary" @click="tab = 'updates'">有更新</NButton><NButton size="small" secondary :type="plugin.state === 'Active' ? 'default' : 'primary'" :loading="togglingKey === plugin.pluginKey" :disabled="plugin.state === 'Draining' || Boolean(deletingKey)" @click="togglePlugin(plugin)">{{ plugin.state === 'Active' ? '禁用' : '启用' }}</NButton><NPopover trigger="click" placement="bottom-end" :show-arrow="false"><template #trigger><NButton size="small" quaternary :aria-label="`${plugin.name} 更多操作`" :loading="deletingKey === plugin.pluginKey" :disabled="plugin.state === 'Draining' || Boolean(togglingKey) || Boolean(deletingKey)"><template #icon><NIcon :component="EllipsisHorizontalOutline" /></template></NButton></template><NPopconfirm @positive-click="deletePlugin(plugin.pluginKey)"><template #trigger><NButton text type="error" :disabled="plugin.state === 'Draining' || Boolean(togglingKey) || Boolean(deletingKey)">删除插件</NButton></template>确定删除 {{ plugin.name }} 的插件文件？</NPopconfirm></NPopover></div>
           </div>
-        </NCard></div>
+        </NCard></TransitionGroup>
       </NTabPane>
       <NTabPane name="updates" tab="插件更新">
         <div class="plugin-update-toolbar"><span>选择要更新的插件，未勾选的插件保持当前版本。</span><div><NButton secondary :loading="updatesQuery.isFetching.value" @click="updatesQuery.refetch()">检查更新</NButton><NButton type="primary" :disabled="!selectedUpdateIds.length" :loading="updating" @click="updateSelected">更新所选 {{ selectedUpdateIds.length }} 个</NButton></div></div>
