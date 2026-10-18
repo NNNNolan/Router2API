@@ -11,6 +11,7 @@ withDefaults(defineProps<{
 
 const isMobile = ref(false)
 const expanded = ref(false)
+const animate = ref(true)
 let mediaQuery: MediaQueryList | undefined
 
 function updateViewport(event?: MediaQueryListEvent) {
@@ -37,13 +38,15 @@ onBeforeUnmount(() => mediaQuery?.removeEventListener('change', updateViewport))
       class="responsive-filter-toggle"
       type="button"
       :aria-expanded="expanded"
-      @click="expanded = !expanded"
+      @click="event => { animate = event.detail > 0; expanded = !expanded }"
     >
       <span>{{ title }}</span>
       <span class="responsive-filter-toggle-state">{{ expanded ? '收起' : '展开' }}</span>
     </button>
-    <div v-show="!isMobile || expanded" class="responsive-filter-content">
-      <slot />
-    </div>
+    <Transition name="panel" :css="animate">
+      <div v-show="!isMobile || expanded" class="responsive-filter-content">
+        <slot />
+      </div>
+    </Transition>
   </div>
 </template>

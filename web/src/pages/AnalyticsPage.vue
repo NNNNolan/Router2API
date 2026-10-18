@@ -9,8 +9,10 @@ import { BarChart, LineChart } from 'echarts/charts'
 import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components'
 import type { EChartsOption } from 'echarts'
 import { api } from '@/services/api'
+import { useReducedMotion } from '@/composables/useReducedMotion'
 
 use([CanvasRenderer, BarChart, LineChart, GridComponent, LegendComponent, TooltipComponent])
+const reducedMotion = useReducedMotion()
 const range = ref('today')
 const ranges = [{ label: '今天', value: 'today' }, { label: '昨天', value: 'yesterday' }, { label: '最近 7 天', value: '7d' }, { label: '最近 30 天', value: '30d' }]
 const bounds = computed(() => { const now = new Date(); const end = new Date(now); const start = new Date(now); start.setHours(0, 0, 0, 0); if (range.value === 'yesterday') { start.setDate(start.getDate() - 1); end.setTime(start.getTime()); end.setDate(end.getDate() + 1) } else if (range.value === '7d') start.setDate(start.getDate() - 6); else if (range.value === '30d') start.setDate(start.getDate() - 29); return { fromUtc: start, toUtc: end } })
@@ -18,6 +20,9 @@ const query = useQuery({ queryKey: computed(() => ['analytics-overview', range.v
 const report = computed(() => query.data.value?.range)
 const liveConnections = computed(() => Number((query.data.value?.live as { activeConnections?: number } | undefined)?.activeConnections ?? 0))
 const option = computed<EChartsOption>(() => ({
+  animation: !reducedMotion.value,
+  animationDuration: 260,
+  animationDurationUpdate: 180,
   tooltip: { trigger: 'axis', axisPointer: { type: 'line' } },
   legend: { top: 0, right: 0, data: ['请求数', '失败数'] },
   grid: { left: 12, right: 24, top: 42, bottom: 52, containLabel: true },

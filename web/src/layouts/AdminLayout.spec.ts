@@ -24,6 +24,7 @@ let queryClient: QueryClient | undefined
 
 afterEach(() => {
   wrapper?.unmount()
+  document.body.replaceChildren()
   queryClient?.clear()
   vi.restoreAllMocks()
 })
@@ -51,6 +52,7 @@ async function renderPlugins(initial: PluginDescriptor[], version: string | Erro
   await router.push('/plugins')
   queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   wrapper = mount(AdminLayout, {
+    attachTo: document.body,
     global: {
       plugins: [router, [VueQueryPlugin, { queryClient }]],
       renderStubDefaultSlot: true,
@@ -82,6 +84,23 @@ function expectMenus(keys: string[]) {
 }
 
 describe('插件侧栏菜单', () => {
+  it('两端导航分组一致，折叠插件页面保留管理入口并更新可访问状态', async () => {
+    const { view } = await renderPlugins([plugin('active')])
+    for (const label of ['主导航', '移动端主导航']) {
+      const nav = view.get(`nav[aria-label="${label}"]`)
+      expect(nav.findAll('.nav-section-label').map(item => item.text())).toEqual(['工作台', '资源管理', '运行诊断', '系统'])
+      const toggle = nav.get('button[aria-controls]')
+      const childrenId = `#${toggle.attributes('aria-controls')}`
+      await toggle.trigger('click')
+      expect(toggle.attributes('aria-expanded')).toBe('false')
+      expect(nav.get(childrenId).isVisible()).toBe(false)
+      expect(nav.get('a[href="/plugins"]').isVisible()).toBe(true)
+      await toggle.trigger('click')
+      expect(toggle.attributes('aria-expanded')).toBe('true')
+      expect(nav.get(childrenId).isVisible()).toBe(true)
+    }
+  })
+
   it.each(['2.0.3', '2.1.0-rc.1'])('桌面和移动端显示后端返回的宿主版本 %s，不使用插件版本', async version => {
     const { view } = await renderPlugins([plugin('example')], version)
     await vi.waitFor(() => expect(view.findAll('[aria-label="宿主版本"]').map(label => label.text())).toEqual([`v${version}`, `v${version}`]))

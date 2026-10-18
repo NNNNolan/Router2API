@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, type Component } from 'vue'
+import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useMessage, NAvatar, NButton, NDrawer, NDrawerContent, NIcon, NLayout, NLayoutContent, NLayoutHeader, NLayoutSider } from 'naive-ui'
 import {
@@ -19,15 +19,15 @@ import {
 import { useAuth } from '@/stores/auth'
 import { useQuery } from '@tanstack/vue-query'
 import { api } from '@/services/api'
+import AdminNavigation, { type NavItem, type NavSection } from '@/components/AdminNavigation.vue'
 
 const route = useRoute()
 const router = useRouter()
 const message = useMessage()
 const auth = useAuth()
 const mobileMenuOpen = ref(false)
+const animateNavigation = ref(true)
 const currentUser = computed(() => auth.principal.value)
-
-type NavItem = { to: string; label: string; icon: Component; children?: NavItem[] }
 
 const pluginQuery = useQuery({ queryKey: ['plugins'], queryFn: api.plugins, staleTime: 30_000 })
 const versionQuery = useQuery({ queryKey: ['host-version'], queryFn: api.hostVersion, staleTime: 60_000 })
@@ -47,31 +47,34 @@ const coreNavItems: NavItem[] = [
   { to: '/plugin-logs', label: '插件日志', icon: BugOutline },
   { to: '/settings/config', label: '配置中心', icon: SettingsOutline },
 ]
-const navItems = computed(() => [
-  ...coreNavItems.slice(0, 5),
-  {
-    ...coreNavItems[5],
-    children: (pluginQuery.data.value ?? [])
-      .filter(plugin => plugin.state === 'Active' && plugin.hasMainPage)
-      .map(plugin => ({ to: `/plugins/${plugin.pluginKey}`, label: plugin.mainPageTitle || plugin.name, icon: ExtensionPuzzleOutline })),
-  },
-  ...coreNavItems.slice(6),
+const navSections = computed<NavSection[]>(() => [
+  { label: '工作台', items: coreNavItems.slice(0, 2) },
+  { label: '资源管理', items: [
+    ...coreNavItems.slice(2, 5),
+    {
+      ...coreNavItems[5],
+      children: (pluginQuery.data.value ?? [])
+        .filter(plugin => plugin.state === 'Active' && plugin.hasMainPage)
+        .map(plugin => ({ to: `/plugins/${plugin.pluginKey}`, label: plugin.mainPageTitle || plugin.name, icon: ExtensionPuzzleOutline })),
+    },
+  ] },
+  { label: '运行诊断', items: coreNavItems.slice(6, 10) },
+  { label: '系统', items: coreNavItems.slice(10) },
 ])
+const currentSection = computed(() => navSections.value.find(section => section.items.some(item =>
+  item.to === route.path || item.children?.some(child => child.to === route.path)))?.label ?? '工作台')
 
-const titles: Record<string, string> = {
-  '/': '总览',
-  '/analytics': '分析数据',
-  '/models': '模型广场',
-  '/accounts': '账号管理',
-  '/proxies': '代理池',
-  '/plugins': '插件管理',
-  '/test': '测试窗口',
-  '/logs': '审计日志',
-  '/task-logs': '任务日志',
-  '/plugin-logs': '插件日志',
-  '/settings/config': '配置中心',
+function navigate(event: MouseEvent) {
+  animateNavigation.value = event.detail > 0
+  mobileMenuOpen.value = false
 }
-const pageTitle = computed(() => titles[route.path] ?? pluginQuery.data.value?.find(plugin => `/plugins/${plugin.pluginKey}` === route.path)?.mainPageTitle ?? 'Router2API')
+
+function resetPageScroll() {
+  document.querySelector('.content-wrap .n-layout-scroll-container')?.scrollTo?.(0, 0)
+}
+
+const pageTitle = computed(() => navSections.value.flatMap(section => section.items)
+  .flatMap(item => [item, ...item.children ?? []]).find(item => item.to === route.path)?.label ?? 'Router2API')
 
 async function signOut() {
   try {
@@ -82,50 +85,34 @@ async function signOut() {
   }
 }
 
-function closeMobileMenu() {
-  mobileMenuOpen.value = false
-}
 </script>
 
 <template>
-  <NLayout has-sider class="app-shell">
-    <NLayoutSider bordered :width="248" class="desktop-sidebar">
+  <NLayout has-sider class="app-shell" :class="{ 'keyboard-navigation': !animateNavigation }" @keydown.capture="animateNavigation = false" @pointerdown.capture="animateNavigation = true">
+    <NLayoutSider bordered :width="224" class="desktop-sidebar">
       <div class="brand-block">
-        <div class="brand-mark">R</div>
+        <div class="brand-mark"><NIcon :component="GitNetworkOutline" :size="22" /></div>
         <div>
           <div class="brand-name">Router2API</div>
           <div class="brand-caption">统一模型路由</div>
         </div>
       </div>
-      <nav class="side-nav" aria-label="主导航">
-        <div v-for="item in navItems" :key="item.to" class="nav-group">
-          <RouterLink :to="item.to" class="nav-link">
-            <NIcon :component="item.icon" :size="19" />
-            <span>{{ item.label }}</span>
-          </RouterLink>
-          <div v-if="item.children?.length" class="nav-subnav">
-            <RouterLink v-for="child in item.children" :key="child.to" :to="child.to" class="nav-link nav-sublink">
-              <NIcon :component="child.icon" :size="16" />
-              <span>{{ child.label }}</span>
-            </RouterLink>
-          </div>
-        </div>
-      </nav>
+      <AdminNavigation id="desktop" :sections="navSections" label="主导航" @navigate="navigate" />
       <div class="sidebar-footer">
-        <div class="health-dot"><span />服务运行中</div>
+        <span class="sidebar-caption">管理员控制台</span>
         <span class="version-label" aria-label="宿主版本">{{ hostVersion }}</span>
       </div>
     </NLayoutSider>
 
-    <NLayout>
+    <NLayout class="workspace-layout">
       <NLayoutHeader bordered class="topbar">
         <div class="topbar-left">
           <NButton class="mobile-menu-button" quaternary circle aria-label="打开导航" @click="mobileMenuOpen = true">
             <template #icon><NIcon :component="MenuOutline" /></template>
           </NButton>
-          <div>
+          <div class="page-breadcrumb">
+            <span>{{ currentSection }}</span><span aria-hidden="true">/</span>
             <h1>{{ pageTitle }}</h1>
-            <p>稳定地连接账号、代理与模型能力</p>
           </div>
         </div>
         <div class="topbar-actions">
@@ -141,28 +128,19 @@ function closeMobileMenu() {
 
       <NLayoutContent class="content-wrap">
         <main id="main-content" class="page-content" tabindex="-1">
-          <RouterView />
+          <RouterView v-slot="{ Component, route: currentRoute }">
+            <Transition name="page" mode="out-in" :css="animateNavigation" @before-enter="resetPageScroll">
+              <div :key="currentRoute.path" class="route-view"><component :is="Component" /></div>
+            </Transition>
+          </RouterView>
         </main>
       </NLayoutContent>
     </NLayout>
   </NLayout>
 
   <NDrawer v-model:show="mobileMenuOpen" placement="left" :width="280">
-    <NDrawerContent title="Router2API" closable>
-      <nav class="mobile-nav" aria-label="移动端主导航">
-        <div v-for="item in navItems" :key="item.to" class="nav-group">
-          <RouterLink :to="item.to" class="nav-link" @click="closeMobileMenu">
-            <NIcon :component="item.icon" :size="19" />
-            <span>{{ item.label }}</span>
-          </RouterLink>
-          <div v-if="item.children?.length" class="nav-subnav">
-            <RouterLink v-for="child in item.children" :key="child.to" :to="child.to" class="nav-link nav-sublink" @click="closeMobileMenu">
-              <NIcon :component="child.icon" :size="16" />
-              <span>{{ child.label }}</span>
-            </RouterLink>
-          </div>
-        </div>
-      </nav>
+    <NDrawerContent title="Router2API" closable :class="{ 'keyboard-navigation': !animateNavigation }" @keydown.capture="animateNavigation = false" @pointerdown.capture="animateNavigation = true">
+      <AdminNavigation id="mobile" :sections="navSections" label="移动端主导航" @navigate="navigate" />
       <div class="sidebar-footer">
         <span class="version-label" aria-label="宿主版本">{{ hostVersion }}</span>
       </div>
