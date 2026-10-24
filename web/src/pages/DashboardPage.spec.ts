@@ -27,7 +27,7 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-async function render(options: { empty?: boolean; fail?: boolean } = {}) {
+async function render(options: { empty?: boolean; fail?: boolean; failMetrics?: boolean } = {}) {
   reduced = false
   motionChanged = undefined
   removeListener.mockClear()
@@ -38,13 +38,13 @@ async function render(options: { empty?: boolean; fail?: boolean } = {}) {
   }))
   const getMetrics = vi.spyOn(api, 'metrics')
   const getTrend = vi.spyOn(api, 'analytics')
-  if (options.fail) {
+  if (options.fail || options.failMetrics) {
     getMetrics.mockRejectedValue(new Error('Unavailable'))
-    getTrend.mockRejectedValue(new Error('Unavailable'))
   } else {
     getMetrics.mockResolvedValue(options.empty ? { ...metrics, successfulRequests: 0, failedRequests: 0 } : metrics)
-    getTrend.mockResolvedValue(options.empty ? { ...report, buckets: [], requests: 0 } : report)
   }
+  if (options.fail) getTrend.mockRejectedValue(new Error('Unavailable'))
+  else getTrend.mockResolvedValue(options.empty ? { ...report, buckets: [], requests: 0 } : report)
   vi.spyOn(api, 'platforms').mockResolvedValue([])
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   view = mount(DashboardPage, {
@@ -64,12 +64,15 @@ describe('总览数据与动效', () => {
   it('趋势只使用分析接口的请求桶，不把 RPM 或累计请求作为历史点', async () => {
     const page = await render()
     expect(api.analytics).toHaveBeenCalledWith(expect.objectContaining({ bucket: 'hour', fromUtc: expect.any(Date), toUtc: expect.any(Date) }))
+    expect(api.metrics).toHaveBeenCalledWith({ timezone: Intl.DateTimeFormat().resolvedOptions().timeZone })
     const option = page.getComponent({ name: 'VChart' }).props('option')
     expect(option.series[0].data).toEqual([6, 14])
     expect(option.series[1].data).toEqual([1, 0])
     expect(page.findAll('.metric-value').map(item => item.text())).toEqual(['20次', '90.0%', '125ms', '2个'])
     expect(page.findAll('.usage-token-value').map(item => item.text())).toEqual(['0', '0', '0'])
     expect(page.text()).toContain('2 次含估算 · 1 次不完整 · 3 次来源未知')
+    expect(page.text()).toContain('已保留日志共 100 次请求')
+    expect(page.text()).toContain('最近一分钟完成 3 次请求')
   })
 
   it('指标和趋势失败时显示错误，不展示伪造的零值或曲线', async () => {
@@ -85,6 +88,14 @@ describe('总览数据与动效', () => {
     expect(page.findAll('.metric-value')[1].text()).toBe('—')
     expect(page.text()).toContain('暂无已完成的请求')
     expect(page.find('.test-chart').exists()).toBe(false)
+  })
+
+  it('指标加载失败不会隐藏已加载的用量和趋势，也不伪造零值卡片', async () => {
+    const page = await render({ failMetrics: true })
+    await vi.waitFor(() => expect(page.text()).toContain('指标暂时不可用'))
+    expect(page.findAll('.metric-card')).toHaveLength(0)
+    expect(page.findAll('.usage-token-value')).toHaveLength(3)
+    expect(page.find('.test-chart').exists()).toBe(true)
   })
 
   it('系统减少动态效果的偏好变化会关闭 Canvas 动画，并在卸载时移除监听', async () => {

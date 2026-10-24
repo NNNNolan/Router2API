@@ -54,17 +54,17 @@ function chart(tokens: boolean): EChartsOption {
   animation: !reducedMotion.value,
   animationDuration: 260,
   animationDurationUpdate: 180,
-  textStyle: { fontFamily: 'Inter, "PingFang SC", "Microsoft YaHei", sans-serif', color: '#667085' },
-  tooltip: { trigger: 'axis' },
+  textStyle: { fontFamily: 'Inter, "PingFang SC", "Microsoft YaHei", sans-serif', color: themeVars.value.textColor3 },
+  tooltip: { backgroundColor: themeVars.value.popoverColor, borderColor: themeVars.value.borderColor, textStyle: { color: themeVars.value.textColor2 }, trigger: 'axis' },
   legend: { top: 0, right: 0, icon: 'roundRect', itemWidth: 12, itemHeight: 4 },
   grid: { left: 12, right: 24, top: 42, bottom: 52, containLabel: true },
   xAxis: {
     type: 'category', boundaryGap: !tokens,
     axisLabel: { hideOverlap: true, margin: 12 },
-    axisLine: { lineStyle: { color: '#E4E7EC' } }, axisTick: { show: false },
+    axisLine: { lineStyle: { color: themeVars.value.borderColor } }, axisTick: { show: false },
     data: data.map(item => new Date(item.startUtc).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false })),
   },
-  yAxis: { type: 'value', minInterval: 1, splitLine: { lineStyle: { type: 'dashed', color: '#EEF0F3' } } },
+  yAxis: { type: 'value', minInterval: 1, splitLine: { lineStyle: { type: 'dashed', color: themeVars.value.dividerColor } } },
   series: tokens
     ? [{ name: '输入 Token', type: 'line', showSymbol: false, data: data.map(item => item.inputTokens ?? null), itemStyle: { color: themeVars.value.primaryColor }, lineStyle: { width: 2 } },
       { name: '输出 Token', type: 'line', showSymbol: false, data: data.map(item => item.outputTokens ?? null), itemStyle: { color: '#8B5CF6' }, lineStyle: { width: 2 } }]

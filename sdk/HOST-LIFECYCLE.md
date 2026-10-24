@@ -291,11 +291,13 @@ writer 的 finally 和 HTTP OnCompleted 提供回收兜底。未被枚举的流�
 
 源码：[PluginPage.vue](../web/src/pages/PluginPage.vue)、[Catalog endpoint 分发](../src/Router.Host/Plugins/PluginCatalog.cs)。
 
-1. 管理端获取缓存 HTML，注入 viewport 和 `window.Router2API` 包装，放进 `srcdoc` iframe。
+1. 管理端获取缓存 HTML，注入 viewport、`window.Router2API` 包装和明暗模式适配脚本，放进 `srcdoc` iframe。
 2. iframe 通过 postMessage 请求当前插件的相对路由；父页面检查 event.source、方法和路径。
 3. 父页面添加插件前缀、管理员 Cookie、必要 CSRF 头，再请求 `/api/plugins/<pluginKey>/<route>`。
 4. Catalog 匹配已绑定 endpoint，默认管理员认证/CSRF，检查 1 MiB 请求体和 endpoint 时限，再创建 `PluginHttpContext`。
 5. Jint 端点返回 JSON/204，父页面把结果回传 iframe。C# 端点显式返回 `ContentType = "text/html; charset=utf-8"` 和字符串 Body 时，宿主按 UTF-8 HTML 原文写出，不套 JSON。
+
+黑夜模式通过已验证来源的 postMessage 同步到 iframe，注入脚本使用宿主配色覆盖中性色背景、文字和边框，继续处理新增 DOM 与样式变化；回到日间时恢复原始内联值及优先级。切换不替换 `srcdoc`、不重载页面，不增加 `allow-same-origin`。只处理后台插件 iframe，公开匿名 HTML 页面不受影响。Canvas、图片和封闭 Shadow DOM 不属于通用覆盖范围。
 
 页面不是可信的宿主服务对象，不把管理员 Cookie/token 注入源码。宿主 2.0.5 起，仅显式 `Anonymous` 端点免管理员登录；其他策略（含 `ApiKey/Custom`）仍沿用管理员要求，`Internal` 不匹配外部路由。匿名写请求必须是 JSON，拒绝跨源 Origin 和浏览器跨站 Fetch Metadata；不使用管理员 Cookie/CSRF。插件需自行处理业务授权、限流、时效和重放保护，不能把管理接口简单标为匿名。
 

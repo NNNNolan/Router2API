@@ -59,7 +59,7 @@ public sealed class ConfigFileService(
                 retention.CurrentValue.DataRetentionDays,
                 retention.CurrentValue.CleanupCron,
                 pluginLogs.CurrentValue.MinimumPluginLogLevel),
-            new ConfigAppearanceSnapshot(appearance.CurrentValue.Theme));
+            new ConfigAppearanceSnapshot(appearance.CurrentValue.Theme, appearance.CurrentValue.ColorMode));
 
     public void EnsureCreated()
     {
@@ -78,8 +78,15 @@ public sealed class ConfigFileService(
         ArgumentNullException.ThrowIfNull(request);
         cancellationToken.ThrowIfCancellationRequested();
 
-        if (request.Appearance is { } appearanceUpdate && !AppearanceOptions.IsSupported(appearanceUpdate.Theme))
-            throw new ArgumentException("主题只能是 default（蓝色）或 minimal（黑白极简）。", nameof(request));
+        if (request.Appearance is { } appearanceUpdate)
+        {
+            if (appearanceUpdate.Theme is null && appearanceUpdate.ColorMode is null)
+                throw new ArgumentException("请指定主题或明暗模式。", nameof(request));
+            if (appearanceUpdate.Theme is not null && !AppearanceOptions.IsSupported(appearanceUpdate.Theme))
+                throw new ArgumentException("主题只能是 default（蓝色）或 minimal（黑白极简）。", nameof(request));
+            if (appearanceUpdate.ColorMode is not null && !AppearanceOptions.IsSupportedColorMode(appearanceUpdate.ColorMode))
+                throw new ArgumentException("明暗模式只能是 light（日间）或 dark（黑夜）。", nameof(request));
+        }
 
         if (request.Auth is not null)
         {
@@ -136,7 +143,11 @@ public sealed class ConfigFileService(
         }
 
         if (request.Appearance is { } appearanceSettings)
-            GetOrCreateObject(root, "Appearance")["Theme"] = appearanceSettings.Theme;
+        {
+            var appearanceNode = GetOrCreateObject(root, "Appearance");
+            if (appearanceSettings.Theme is not null) appearanceNode["Theme"] = appearanceSettings.Theme;
+            if (appearanceSettings.ColorMode is not null) appearanceNode["ColorMode"] = appearanceSettings.ColorMode;
+        }
 
         Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
         WriteJson(root);
@@ -168,7 +179,7 @@ public sealed class ConfigFileService(
                 ["CleanupCron"] = retention.CurrentValue.CleanupCron,
                 ["MinimumPluginLogLevel"] = pluginLogs.CurrentValue.MinimumPluginLogLevel
             },
-            ["Appearance"] = new JsonObject { ["Theme"] = appearance.CurrentValue.Theme }
+            ["Appearance"] = new JsonObject { ["Theme"] = appearance.CurrentValue.Theme, ["ColorMode"] = appearance.CurrentValue.ColorMode }
         };
 
     private JsonObject ReadDocument()
@@ -231,7 +242,7 @@ public sealed record ConfigRedisSnapshot(string ConnectionString, string Instanc
 public sealed record ConfigLoggingSnapshot(int DataRetentionDays, string CleanupCron, string MinimumPluginLogLevel);
 
 /// <summary>允许前端读取的主题设置，不包含宿主配置的其他内容。</summary>
-public sealed record ConfigAppearanceSnapshot(string Theme);
+public sealed record ConfigAppearanceSnapshot(string Theme, string ColorMode = "light");
 
 public sealed class ConfigUpdateRequest
 {
@@ -246,8 +257,10 @@ public sealed class ConfigUpdateRequest
 /// <summary>管理员保存的界面主题标识，由宿主校验允许列表。</summary>
 public sealed class ConfigAppearanceUpdate
 {
-    /// <summary>必须明确指定已实现的主题。</summary>
+    /// <summary>可选的主题变更，省略时保留当前主题。</summary>
     public string? Theme { get; init; }
+    /// <summary>可选的明暗模式变更，省略时保留当前模式。</summary>
+    public string? ColorMode { get; init; }
 }
 
 public sealed class ConfigAuthUpdate

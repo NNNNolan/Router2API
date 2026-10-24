@@ -22,7 +22,10 @@ public sealed class AppearanceConfigurationTests
         {
             var config = services.GetRequiredService<ConfigFileService>();
             config.Get().Appearance.Theme.Should().Be("minimal");
+            config.Get().Appearance.ColorMode.Should().Be("light");
             config.EnsureCreated();
+            var dark = await config.SaveAsync(new() { Appearance = new() { ColorMode = "dark" } });
+            dark.Appearance.Should().Be(new ConfigAppearanceSnapshot("minimal", "dark"));
             var saved = await config.SaveAsync(new() { Appearance = new() { Theme = "default" } });
             saved.Appearance.Theme.Should().Be("default");
             (await config.SaveAsync(new() { Database = new() { Path = "test.db" } })).Appearance.Theme.Should().Be("default");
@@ -30,8 +33,27 @@ public sealed class AppearanceConfigurationTests
         using var restarted = CreateServices(path);
         var reloaded = restarted.GetRequiredService<ConfigFileService>();
         reloaded.Get().Appearance.Theme.Should().Be("default");
+        reloaded.Get().Appearance.ColorMode.Should().Be("dark");
         JsonNode.Parse(File.ReadAllText(path))!["Appearance"]!["Theme"]!.GetValue<string>().Should().Be("default");
         (await reloaded.SaveAsync(new() { Appearance = new() { Theme = "minimal" } })).Appearance.Theme.Should().Be("minimal");
+        reloaded.Get().Appearance.ColorMode.Should().Be("dark");
+        (await reloaded.SaveAsync(new() { Appearance = new() { ColorMode = "light" } })).Appearance.Should().Be(new ConfigAppearanceSnapshot("minimal", "light"));
+    }
+
+    [TestMethod]
+    [DataRow("")]
+    [DataRow("auto")]
+    [DataRow("DARK")]
+    public async Task UnsupportedColorModeDoesNotModifyConfiguration(string mode)
+    {
+        var path = TestPath();
+        using var services = CreateServices(path);
+        var config = services.GetRequiredService<ConfigFileService>();
+        config.EnsureCreated();
+        var original = File.ReadAllText(path);
+        Func<Task> save = () => config.SaveAsync(new() { Appearance = new() { ColorMode = mode } });
+        await save.Should().ThrowAsync<ArgumentException>();
+        File.ReadAllText(path).Should().Be(original);
     }
 
     [TestMethod]

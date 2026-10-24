@@ -14,8 +14,9 @@ public sealed record ModelMapping(string Id, string Name, bool Enabled, IReadOnl
 /// <param name="RetryCount">包含首次请求的总尝试次数；空值继承插件。</param>
 /// <param name="FailureThreshold">连续失败多少轮后冷却；零表示不冷却。</param>
 /// <param name="CooldownSeconds">冷却秒数；零表示不冷却。</param>
+/// <param name="HideFromModelList">是否从公开模型列表隐藏此目标的原始模型；不影响调用或映射名。</param>
 public sealed record ModelMappingTarget(string PluginKey, string Platform, string Model, bool Enabled = true,
-    int? RetryCount = null, int FailureThreshold = 3, int CooldownSeconds = 300);
+    int? RetryCount = null, int FailureThreshold = 3, int CooldownSeconds = 300, bool HideFromModelList = false);
 
 /// <summary>将整条映射原子保存为一行，数组顺序即调用顺序；每次请求读取独立快照。</summary>
 public sealed class ModelMappingStore(SqlSugarDatabase database, ModelMappingHealth health)

@@ -1,6 +1,6 @@
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query'
-import { NButton, NForm, NInput, NInputNumber, NPopconfirm, NSelect } from 'naive-ui'
+import { NButton, NCheckbox, NForm, NInput, NInputNumber, NPopconfirm, NSelect } from 'naive-ui'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { api, type ModelMapping } from '@/services/api'
 import ModelMappingsPage from './ModelMappingsPage.vue'
@@ -13,8 +13,8 @@ let client: QueryClient | undefined
 const mapping: ModelMapping = {
   id: 'mapping-id', name: 'ds4', enabled: true,
   targets: [
-    { pluginKey: 'plugin-a', platform: 'a', model: 'real-a', enabled: true, retryCount: 1, failureThreshold: 3, cooldownSeconds: 300 },
-    { pluginKey: 'plugin-b', platform: 'b', model: 'real-b', enabled: true, retryCount: null, failureThreshold: 3, cooldownSeconds: 300 },
+    { pluginKey: 'plugin-a', platform: 'a', model: 'real-a', enabled: true, retryCount: 1, failureThreshold: 3, cooldownSeconds: 300, hideFromModelList: false },
+    { pluginKey: 'plugin-b', platform: 'b', model: 'real-b', enabled: true, retryCount: null, failureThreshold: 3, cooldownSeconds: 300, hideFromModelList: false },
   ],
 }
 
@@ -30,7 +30,7 @@ async function render(initial: ModelMapping[] = []) {
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   view = mount(ModelMappingsPage, { global: {
     plugins: [[VueQueryPlugin, { queryClient: client }]], renderStubDefaultSlot: true,
-    stubs: Object.fromEntries(['NAlert', 'NButton', 'NCard', 'NEmpty', 'NForm', 'NFormItem', 'NInput', 'NInputNumber', 'NModal', 'Modal', 'NPopconfirm', 'NSelect', 'NSpin', 'NSwitch', 'NTag'].map(name => [name, true])),
+    stubs: Object.fromEntries(['NAlert', 'NButton', 'NCard', 'NCheckbox', 'NEmpty', 'NForm', 'NFormItem', 'NInput', 'NInputNumber', 'NModal', 'Modal', 'NPopconfirm', 'NSelect', 'NSpin', 'NSwitch', 'NTag'].map(name => [name, true])),
   } })
   await flushPromises()
   return view
@@ -51,6 +51,19 @@ function number(label: string) {
 }
 
 describe('模型映射管理', () => {
+  it('每个目标独立保存隐藏原模型开关，其他目标保持可见', async () => {
+    const configured = { ...mapping, targets: [{ ...mapping.targets[0]!, hideFromModelList: true }, mapping.targets[1]!] }
+    const write = vi.spyOn(api, 'saveModelMapping').mockResolvedValue(configured)
+    const page = await render([mapping])
+    await click('编辑')
+    const options = page.findAllComponents(NCheckbox)
+    expect(options.map(option => option.props('checked'))).toEqual([false, false])
+    options[0]!.vm.$emit('update:checked', true)
+    await flushPromises()
+    page.getComponent(NForm).vm.$emit('submit', new Event('submit'))
+    await vi.waitFor(() => expect(write).toHaveBeenCalledWith(configured))
+  })
+
   it('新建目标默认 3 轮、5 分钟，并允许为新目标单独设置', async () => {
     await render()
     await click('新建映射')
@@ -173,8 +186,8 @@ describe('模型映射管理', () => {
     page.getComponent(NForm).vm.$emit('submit', new Event('submit'))
     await vi.waitFor(() => expect(save).toHaveBeenCalled())
     expect(save).toHaveBeenCalledWith({ id: '', name: 'ds4', enabled: true, targets: [
-      { pluginKey: 'plugin-b', platform: 'b', model: 'custom-b', enabled: true, retryCount: null, failureThreshold: 3, cooldownSeconds: 300 },
-      { pluginKey: 'plugin-a', platform: 'a', model: 'custom-a', enabled: true, retryCount: 3, failureThreshold: 3, cooldownSeconds: 300 },
+      { pluginKey: 'plugin-b', platform: 'b', model: 'custom-b', enabled: true, retryCount: null, failureThreshold: 3, cooldownSeconds: 300, hideFromModelList: false },
+      { pluginKey: 'plugin-a', platform: 'a', model: 'custom-a', enabled: true, retryCount: 3, failureThreshold: 3, cooldownSeconds: 300, hideFromModelList: false },
     ] })
     await vi.waitFor(() => expect(message.success).toHaveBeenCalledWith('模型映射已保存'))
     expect(page.find('.mapping-editor').exists()).toBe(false)

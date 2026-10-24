@@ -1,6 +1,7 @@
 {
   "Appearance": {
-    "Theme": "minimal"
+    "Theme": "minimal",
+    "ColorMode": "light"
   },
   "Database": {
     "Path": "data/router2api.db"

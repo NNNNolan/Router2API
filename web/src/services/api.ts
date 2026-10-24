@@ -1,6 +1,7 @@
 export interface Principal { userName: string; role: string }
 export type AppearanceTheme = 'default' | 'minimal'
-export interface AppearanceSettings { theme: AppearanceTheme }
+export type AppearanceColorMode = 'light' | 'dark'
+export interface AppearanceSettings { theme: AppearanceTheme; colorMode: AppearanceColorMode }
 
 export interface Metrics {
   totalRequests: number
@@ -16,7 +17,7 @@ export interface Metrics {
 export interface PlatformMetric { platform: string; requests: number; errors: number; averageLatencyMs: number }
 export interface Platform { name: string; pluginKey: string; displayName: string; probeEndpoint: string | null; enabled: boolean }
 // retryCount 沿用服务端字段名，表示含首次请求的总尝试次数；null 继承插件。
-export interface ModelMappingTarget { pluginKey: string; platform: string; model: string; enabled: boolean; retryCount: number | null; failureThreshold: number; cooldownSeconds: number }
+export interface ModelMappingTarget { pluginKey: string; platform: string; model: string; enabled: boolean; retryCount: number | null; failureThreshold: number; cooldownSeconds: number; hideFromModelList: boolean }
 export interface ModelMapping { id: string; name: string; enabled: boolean; targets: ModelMappingTarget[] }
 
 export interface PageResult<T> { items: T[]; page: number; pageSize: number; total: number; totalPages: number }
@@ -194,12 +195,6 @@ function normalizeModelPlaza(value: unknown): ModelPlazaResponse {
   return { updatedAt: asString(pick(raw, 'updatedAt', 'updated_at')) ?? '', source: asString(pick(raw, 'source')) ?? 'plugins', models }
 }
 
-function normalizeMetrics(value: unknown): Metrics {
-  const raw = asObject(value); const byPlatform = asObject(pick(raw, 'byPlatform')); const platforms = Array.isArray(raw.platforms) ? raw.platforms.map(asObject) : Object.entries(byPlatform).map(([platform, item]) => ({ platform, ...asObject(item) }))
-  const total = asNumber(pick(raw, 'totalRequests', 'requestsToday')) ?? 0; const failures = asNumber(pick(raw, 'failedRequests', 'failuresToday')) ?? 0
-  return { totalRequests: total, successfulRequests: asNumber(pick(raw, 'successfulRequests')) ?? Math.max(0, total - failures), failedRequests: failures, averageLatencyMs: asNumber(pick(raw, 'averageLatencyMs', 'avgLatencyMs')) ?? 0, requestsPerMinute: asNumber(pick(raw, 'requestsPerMinute')) ?? 0, requestsToday: asNumber(pick(raw, 'requestsToday')) ?? total, activeRequests: asNumber(pick(raw, 'activeRequests', 'activeConnections')) ?? 0, platforms: platforms.map(item => ({ platform: asString(pick(item, 'platform', 'name')) ?? '', requests: asNumber(pick(item, 'requests', 'requestCount')) ?? 0, errors: asNumber(pick(item, 'errors', 'failures')) ?? 0, averageLatencyMs: asNumber(pick(item, 'averageLatencyMs', 'avgLatencyMs')) ?? 0 })) }
-}
-
 function queryString(values: Record<string, unknown>): string {
   const params = new URLSearchParams()
   for (const [key, value] of Object.entries(values)) if (value !== undefined && value !== null && value !== '') params.set(key, value instanceof Date ? value.toISOString() : String(value))
@@ -230,7 +225,7 @@ export const api = {
   logout: () => request<void>('/api/admin/logout', { method: 'POST' }),
   me: async () => normalizePrincipal(await request<unknown>('/api/admin/me')),
   hostVersion: () => request<{ version: string }>('/api/admin/version'),
-  metrics: async () => normalizeMetrics(await request<unknown>('/api/admin/metrics')),
+  metrics: (params: { timezone?: string } = {}) => request<Metrics>(`/api/admin/dashboard${queryString(params)}`),
   analyticsOverview: (params: { fromUtc?: Date; toUtc?: Date; timezone?: string; platform?: string; model?: string } = {}) => request<{ range: AnalyticsReport; live: { activeConnections: number } }>(`/api/admin/analytics/overview${queryString(params)}`),
   analytics: (params: { fromUtc?: Date; toUtc?: Date; platform?: string; model?: string; bucket?: string } = {}) => request<AnalyticsReport>(`/api/admin/analytics${queryString(params)}`),
   logs: async (params: PageParams & { fromUtc?: Date; toUtc?: Date; platform?: string; model?: string; keyword?: string } = {}) => page(await request<unknown>(`/api/admin/logs${queryString(params)}`), value => asObject(value) as unknown as RequestLog),

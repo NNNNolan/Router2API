@@ -21,6 +21,8 @@
 - [AI 开发工作单](sdk/AI-DEVELOPMENT.md)
 - [公开前与部署安全检查](SECURITY.md)
 
+模型映射的每个目标可选择「从 /v1/models 隐藏原模型」。仅启用的映射及可用目标生效，只隐藏该目标的原始模型 ID（如 `pluginA/ds4`），映射名仍显示，原始模型的直接调用不受影响；未设置时保持显示。
+
 ## 本地开发
 
 需要 .NET 10 SDK、PowerShell 7、Node 22.18+/24 LTS 和项目声明版本的 pnpm。
@@ -63,7 +65,9 @@ dotnet run --project src/Router.Host/Router.Host.csproj --no-build --no-launch-p
 
 **配置文件 `Config/Config.json` 按进程工作目录读取，优先级高于 User Secrets 和环境变量。** 首次启动会生成配置，并迁移管理员密码为哈希；后续修改环境变量不会覆盖已有 Config。先确认实际配置路径，使用独立测试数据库/Redis，不要直接带入生产账号。
 
-在「系统 → 配置中心 → 界面主题」选择黑白极简主题（默认）或蓝色主题，保存后当前页面立即应用，其他浏览器刷新后同步，登录页也使用同一主题。设置持久化为 `Appearance.Theme`（`minimal` 为黑白，`default` 为蓝色）。未配置主题时默认黑白，已保存的主题选择保持不变。公开接口 `GET /api/appearance` 仅返回主题标识，修改仍需管理员会话与 CSRF 校验。
+在「系统 → 配置中心 → 界面主题」选择黑白极简主题（默认）或蓝色主题，保存后当前页面立即应用，其他浏览器刷新后同步，登录页也使用同一主题。设置持久化为 `Appearance.Theme`（`minimal` 为黑白，`default` 为蓝色）。未配置主题时默认黑白，已保存的主题选择保持不变。两套主题均支持右上角账户前的日间/黑夜切换，明暗模式保存为 `Appearance.ColorMode`（`light` / `dark`），刷新和重启后保留。公开接口 `GET /api/appearance` 仅返回主题和明暗模式，修改仍需管理员会话与 CSRF 校验。
+
+插件管理页面会跟随宿主黑夜模式：宿主在 sandbox iframe 内注入样式，适配常见浅色底、深色字、表单与表格，保留状态色和图片；切回日间恢复原样式，切换不重载页面。Canvas、图片中的颜色、封闭 Shadow DOM 和特殊主题控件仍需插件适配。
 
 `UserSecretsId` 是 `Router2API-Public`，与原开发环境隔离。示例配置在 `src/Router.Host/Config/Config.example.json`；复制后必须自己填写密码和密钥。实际配置、数据库及运行日志均被 Git 忽略。
 
@@ -280,6 +284,8 @@ docker logs --tail=100 router2api
 模型品牌按 ID 优先、显示名称补充识别，移除当前转发平台前缀后匹配模型族和组织名。图标使用 [LobeHub Icons](https://github.com/lobehub/lobe-icons) 的静态 SVG 包按需打包，保留品牌原色，不依赖运行时 CDN。未知品牌或图片加载失败时显示最多两字符缩写，DeepSeek 固定显示 `DS`。
 
 总览、用量分析和请求日志的 Token 数据来自同一份持久化请求日志。采集优先级为插件显式用量、正文/SSE 用量、宿主估算；合法零值保留，累计快照覆盖而不相加，分阶段上报的缓存和推理用量独立合并。输入、输出和总量来源分别记录，合法上游总量不强制改写为输入与输出之和。
+
+总览的今日请求、累计成功率、平均延迟和平台请求明细由已保留的请求日志聚合，宿主重启后仍可显示；进行中请求取实时进程状态，最近一分钟统计已完成请求。`GET /api/admin/dashboard` 接收浏览器时区确定“今日”，默认 `Asia/Shanghai`；原有 `/api/admin/metrics` 和指标流仍返回进程实时快照。
 
 已知模型编码使用 `Microsoft.ML.Tokenizers` 与本地 `cl100k_base` / `o200k_base` 词表；未知模型和缺少用量的流式输出使用有状态 Unicode 估算，记录算法版本。估算不能代替上游账单；无法计量的多模态内容、取消和写出失败会标记不完整。旧日志缺少来源元数据时显示“来源未知”，启动会增量增加可空字段，不回填虚构来源。
 

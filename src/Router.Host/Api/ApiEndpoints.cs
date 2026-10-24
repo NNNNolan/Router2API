@@ -20,11 +20,11 @@ public static class ApiEndpoints
     public static void Map(WebApplication app)
     {
         ModelMappingEndpoints.Map(app);
-        // 登录页也需要主题，只公开经过校验的主题名，不读取管理员配置快照。
+        // 登录页也需要外观设置，只公开主题和明暗模式，不读取管理员配置快照。
         app.MapGet("/api/appearance", (IOptionsMonitor<AppearanceOptions> options, HttpContext context) =>
         {
             context.Response.Headers.CacheControl = "no-store";
-            return Results.Ok(new ConfigAppearanceSnapshot(options.CurrentValue.Theme));
+            return Results.Ok(new ConfigAppearanceSnapshot(options.CurrentValue.Theme, options.CurrentValue.ColorMode));
         });
         app.MapPost("/api/admin/login", LoginAsync);
         app.MapPost("/api/admin/logout", LogoutAsync);
@@ -38,6 +38,7 @@ public static class ApiEndpoints
         app.MapGet("/api/admin/config", (IConfigFileService config) => Results.Ok(config.Get()));
         app.MapPut("/api/admin/config", SaveConfigAsync);
         app.MapGet("/api/admin/metrics", (IRealtimeMetrics metrics) => Results.Ok(metrics.Snapshot()));
+        app.MapGet("/api/admin/dashboard", GetDashboardMetricsAsync);
         app.MapGet("/api/admin/analytics/overview", GetAnalyticsOverviewAsync);
         app.MapGet("/api/admin/analytics", GetAnalyticsAsync);
         app.MapGet("/api/admin/metrics/stream", StreamMetricsAsync);
@@ -84,7 +85,6 @@ public static class ApiEndpoints
         app.MapPost("/v1/messages", AnthropicMessagesAsync).RequireCors("v1");
         app.MapPost("/v1/embeddings", EmbeddingsAsync).RequireCors("v1");
         app.MapGet("/v1/models", ModelsAsync).RequireCors("v1");
-
         app.MapPost("/api/admin/test/chat", TestChatAsync);
         app.MapPost("/api/admin/test/models", ModelsAsync);
         app.MapPost("/api/admin/test/credentials/{accountId}", TestCredentialAsync);
@@ -249,6 +249,13 @@ public static class ApiEndpoints
                 model,
                 keyword),
             cancellationToken));
+
+    private static async Task<IResult> GetDashboardMetricsAsync(string? timezone, DashboardMetricsService dashboard,
+        IRealtimeMetrics metrics, CancellationToken cancellationToken)
+    {
+        var (from, to) = ResolveRange(null, null, timezone);
+        return Results.Ok(await dashboard.QueryAsync(from, to, DateTimeOffset.UtcNow, metrics.Snapshot().ActiveConnections, cancellationToken));
+    }
 
     private static async Task<IResult> GetAnalyticsOverviewAsync(
         string? fromUtc,
@@ -861,15 +868,24 @@ public static class ApiEndpoints
         ModelMappingStore mappings,
         IPlatformRegistry platforms,
         CancellationToken cancellationToken)
-        => Results.Ok(new
+    {
+        bool IsAvailable(ModelMappingTarget target) => target.Enabled
+            && platforms.Get(target.Platform) is { Enabled: true } registration
+            && registration.PluginKey.Equals(target.PluginKey, StringComparison.OrdinalIgnoreCase);
+        var activeMappings = mappings.List().Where(mapping => mapping.Enabled).ToArray();
+        var hiddenModels = activeMappings.SelectMany(mapping => mapping.Targets)
+            .Where(target => target.HideFromModelList && IsAvailable(target))
+            .Select(target => $"{target.Platform}/{target.Model}")
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var models = await catalog.ListAsync(cancellationToken);
+        return Results.Ok(new
         {
             @object = "list",
-            data = (await catalog.ListAsync(cancellationToken)).Concat(mappings.List()
-                .Where(mapping => mapping.Enabled && mapping.Targets.Any(target => target.Enabled
-                    && platforms.Get(target.Platform) is { Enabled: true } registration
-                    && registration.PluginKey.Equals(target.PluginKey, StringComparison.OrdinalIgnoreCase)))
-                .Select(mapping => new ModelDescriptor(mapping.Name, mapping.Name)))
+            data = models.Where(model => !hiddenModels.Contains(model.Id))
+                .Concat(activeMappings.Where(mapping => mapping.Targets.Any(IsAvailable))
+                    .Select(mapping => new ModelDescriptor(mapping.Name, mapping.Name)))
         });
+    }
 
     private static IResult EmbeddingsAsync()
         => Results.Json(

@@ -4,6 +4,16 @@ import { api } from './api'
 
 afterEach(() => vi.unstubAllGlobals())
 
+it('总览读取持久化指标接口并传递本地时区，保留真实的累计值与实时进行中数', async () => {
+  const metrics = { totalRequests: 100, successfulRequests: 80, failedRequests: 20, averageLatencyMs: 1250,
+    requestsToday: 12, requestsPerMinute: 4, activeRequests: 2,
+    platforms: [{ platform: 'test', requests: 100, errors: 20, averageLatencyMs: 1250 }] }
+  const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify(metrics)))
+  vi.stubGlobal('fetch', fetchMock)
+  expect(await api.metrics({ timezone: 'Asia/Shanghai' })).toEqual(metrics)
+  expect(fetchMock.mock.calls[0]![0]).toBe('/api/admin/dashboard?timezone=Asia%2FShanghai')
+})
+
 describe('测试窗口原始响应', () => {
   it.each([
     [200, '{ "id": 9007199254740993, "content": "**原始内容**" }\n'],

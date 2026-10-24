@@ -44,6 +44,7 @@ builder.Services.AddOptions<LogRetentionOptions>()
 builder.Services.AddOptions<AppearanceOptions>()
     .Bind(builder.Configuration.GetSection("Appearance"))
     .Validate(options => AppearanceOptions.IsSupported(options.Theme), "Appearance theme must be default or minimal.")
+    .Validate(options => AppearanceOptions.IsSupportedColorMode(options.ColorMode), "Appearance color mode must be light or dark.")
     .ValidateOnStart();
 builder.Services.AddSingleton<PasswordHasher>();
 builder.Services.AddSingleton<AdminAuthService>();

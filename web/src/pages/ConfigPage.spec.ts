@@ -8,7 +8,7 @@ import ConfigPage from './ConfigPage.vue'
 const message = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }))
 vi.mock('naive-ui', async importOriginal => ({ ...await importOriginal<typeof import('naive-ui')>(), useMessage: () => message }))
 const initial: ConfigSnapshot = {
-  configPath: 'test/config.json', fileExists: true, source: 'test', appearance: { theme: 'default' },
+  configPath: 'test/config.json', fileExists: true, source: 'test', appearance: { theme: 'default', colorMode: 'light' },
   auth: { adminEnabled: true, sessionLifetimeHours: 12, administratorCount: 1, apiKeyEnabled: true, apiKeyPreview: '********', apiKeyConfigured: true },
   database: { path: 'test.db' }, redis: { connectionString: '', instanceName: 'test:' },
   logging: { dataRetentionDays: 30, cleanupCron: '0 0 3 * * *', minimumPluginLogLevel: 'Information' },
@@ -35,12 +35,12 @@ async function save() {
 }
 
 it('选择主题后保存到服务器，成功后才更新全局主题', async () => {
-  const write = vi.spyOn(api, 'saveConfig').mockResolvedValue({ ...initial, appearance: { theme: 'minimal' } })
+  const write = vi.spyOn(api, 'saveConfig').mockResolvedValue({ ...initial, appearance: { theme: 'minimal', colorMode: 'light' } })
   await render()
-  expect(client!.getQueryData(['appearance'])).toEqual({ theme: 'default' })
+  expect(client!.getQueryData(['appearance'])).toEqual({ theme: 'default', colorMode: 'light' })
   await save()
   expect(write).toHaveBeenCalledWith(expect.objectContaining({ appearance: { theme: 'minimal' } }))
-  expect(client!.getQueryData(['appearance'])).toEqual({ theme: 'minimal' })
+  expect(client!.getQueryData(['appearance'])).toEqual({ theme: 'minimal', colorMode: 'light' })
   expect(message.success).toHaveBeenCalled()
 })
 
@@ -48,7 +48,7 @@ it('保存失败保留编辑选择和已生效的主题，并显示错误', asyn
   vi.spyOn(api, 'saveConfig').mockRejectedValue(new Error('写入失败'))
   const page = await render()
   await save()
-  expect(client!.getQueryData(['appearance'])).toEqual({ theme: 'default' })
+  expect(client!.getQueryData(['appearance'])).toEqual({ theme: 'default', colorMode: 'light' })
   expect(page.findAllComponents(NSelect)[0]!.props('value')).toBe('minimal')
   expect(message.error).toHaveBeenCalledWith('写入失败')
   expect(message.success).not.toHaveBeenCalled()

@@ -1,11 +1,23 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useQuery } from '@tanstack/vue-query'
-import { NAlert, NCard, NSpin } from 'naive-ui'
+import { NAlert, NCard, NSpin, useThemeVars } from 'naive-ui'
 import { api } from '@/services/api'
+import { useAppearance } from '@/composables/useAppearance'
+import { pluginAppearanceScript, type PluginAppearance } from '@/services/pluginAppearance'
 
 const route = useRoute(); const pluginKey = computed(() => String(route.params.pluginKey ?? '')); const frame = ref<HTMLIFrameElement | null>(null)
+const { theme, colorMode } = useAppearance()
+const themeVars = useThemeVars()
+function syncAppearance() {
+  const colors = themeVars.value
+  const appearance: PluginAppearance = { theme: theme.value, colorMode: colorMode.value, colors: {
+    background: colors.bodyColor, surface: colors.cardColor, text: colors.textColor2, muted: colors.textColor3, border: colors.borderColor,
+  } }
+  frame.value?.contentWindow?.postMessage({ type: 'router2api-appearance', appearance }, '*')
+}
+watch([theme, colorMode, themeVars], syncAppearance, { flush: 'post' })
 const query = useQuery({ queryKey: computed(() => ['plugin-page', pluginKey.value]), queryFn: () => api.pluginPage(pluginKey.value), enabled: computed(() => Boolean(pluginKey.value)) })
 const srcdoc = computed(() => {
   const bridge = `<script>(function(){let n=0;const pending=new Map();window.addEventListener('message',e=>{if(e.data&&e.data.type==='router2api-response'){const p=pending.get(e.data.id);if(!p)return;pending.delete(e.data.id);e.data.ok?p.resolve(e.data.body):p.reject(new Error(e.data.error||'请求失败'))}});function call(type,payload){return new Promise(function(resolve,reject){const id=String(++n);pending.set(id,{resolve,reject});parent.postMessage(Object.assign({type:type,id:id},payload),'*')})}window.Router2API={request:function(method,route,body){return call('router2api-request',{method:method,route:route,body:body})},runTask:function(task){return call('router2api-task',{task:task})}}})();<\/script>`
@@ -15,15 +27,16 @@ const srcdoc = computed(() => {
     ? ''
     : '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">'
   if (/<head\b[^>]*>/i.test(html))
-    return html.replace(/<head\b[^>]*>/i, match => `${match}${viewport}${bridge}`)
+    return html.replace(/<head\b[^>]*>/i, match => `${match}${viewport}${bridge}${pluginAppearanceScript}`)
 
   if (/<html\b[^>]*>/i.test(html))
-    return html.replace(/<html\b[^>]*>/i, match => `${match}<head>${viewport}${bridge}</head>`)
+    return html.replace(/<html\b[^>]*>/i, match => `${match}<head>${viewport}${bridge}${pluginAppearanceScript}</head>`)
 
-  return `<!doctype html><html><head>${viewport}${bridge}</head><body>${html}</body></html>`
+  return `<!doctype html><html><head>${viewport}${bridge}${pluginAppearanceScript}</head><body>${html}</body></html>`
 })
 async function onMessage(event: MessageEvent) {
   if (event.source !== frame.value?.contentWindow) return
+  if (event.data?.type === 'router2api-appearance-ready') return syncAppearance()
   if (event.data?.type === 'router2api-task') return runTask(event)
   if (event.data?.type !== 'router2api-request') return
   const route = String(event.data.route ?? '').replace(/^\/+/, '')
@@ -69,7 +82,7 @@ onMounted(() => window.addEventListener('message', onMessage)); onBeforeUnmount(
     <div class="plugin-page-content">
       <div v-if="query.isPending.value" class="plugin-page-state"><NSpin /></div>
       <div v-else-if="query.isError.value" class="plugin-page-state plugin-page-error"><NAlert type="error" title="插件页面加载失败">该插件可能没有可用主页面。</NAlert></div>
-      <iframe v-else ref="frame" class="plugin-frame" sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox" :srcdoc="srcdoc" :title="`${pluginKey} 插件页面`" />
+      <iframe v-else ref="frame" class="plugin-frame" sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox" :srcdoc="srcdoc" :title="`${pluginKey} 插件页面`" @load="syncAppearance" />
     </div>
   </NCard>
 </template>

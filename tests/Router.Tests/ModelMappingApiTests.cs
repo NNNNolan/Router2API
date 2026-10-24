@@ -58,7 +58,7 @@ public sealed class ModelMappingApiTests
         builder.Services.AddSingleton(Mock.Of<IModelMetadataCatalog>());
         builder.Services.AddSingleton(Mock.Of<ISharedKeyValueStore>());
         var catalog = new Mock<IModelCatalog>();
-        catalog.Setup(value => value.ListAsync(It.IsAny<CancellationToken>())).ReturnsAsync([new("a/real-a", "real-a")]);
+        catalog.Setup(value => value.ListAsync(It.IsAny<CancellationToken>())).ReturnsAsync([new("a/real-a", "real-a"), new("b/real-b", "real-b")]);
         builder.Services.AddSingleton(catalog.Object);
         var accounts = new Mock<IAccountService>();
         accounts.Setup(value => value.QueryAsync(It.IsAny<AccountQuery>(), It.IsAny<CancellationToken>()))
@@ -96,9 +96,11 @@ public sealed class ModelMappingApiTests
         appearance.EnsureSuccessStatusCode();
         appearance.Headers.CacheControl!.NoStore.Should().BeTrue();
         var publicSettings = await appearance.Content.ReadFromJsonAsync<JsonElement>();
-        publicSettings.EnumerateObject().Should().ContainSingle();
+        publicSettings.EnumerateObject().Should().HaveCount(2);
         publicSettings.GetProperty("theme").GetString().Should().Be("minimal");
+        publicSettings.GetProperty("colorMode").GetString().Should().Be("light");
         (await client.GetAsync("/api/admin/model-mappings")).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+        (await client.GetAsync("/api/admin/dashboard")).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
         var login = await client.PostAsJsonAsync("/api/admin/login", new { username = "mapping-admin", password });
         login.EnsureSuccessStatusCode();
         var cookies = login.Headers.GetValues("Set-Cookie").Select(cookie => cookie.Split(';')[0]).ToArray();
@@ -118,8 +120,41 @@ public sealed class ModelMappingApiTests
         (await client.PostAsJsonAsync("/api/admin/model-mappings", mapping with { Name = "a/model" })).StatusCode.Should().Be(HttpStatusCode.BadRequest);
         (await client.PostAsJsonAsync("/api/admin/model-mappings", mapping with { Name = "invalid-cooldown", Targets = [mapping.Targets[0] with { CooldownSeconds = -1 }] })).StatusCode.Should().Be(HttpStatusCode.BadRequest);
         (await client.GetFromJsonAsync<ModelMapping[]>("/api/admin/model-mappings"))!.Should().ContainSingle();
-        var models = await client.GetFromJsonAsync<JsonElement>("/v1/models");
-        models.GetProperty("data").EnumerateArray().Select(model => model.GetProperty("id").GetString()).Should().Contain("ds4");
+        async Task<string?[]> ModelIds() => (await client.GetFromJsonAsync<JsonElement>("/v1/models"))
+            .GetProperty("data").EnumerateArray().Select(model => model.GetProperty("id").GetString()).ToArray();
+        (await ModelIds()).Should().BeEquivalentTo("a/real-a", "b/real-b", "ds4");
+        saved = saved with { Targets = [saved.Targets[0] with { HideFromModelList = true }, saved.Targets[1]] };
+        (await client.PutAsJsonAsync($"/api/admin/model-mappings/{saved.Id}", saved)).EnsureSuccessStatusCode();
+        (await client.GetFromJsonAsync<ModelMapping[]>("/api/admin/model-mappings"))![0].Targets[0].HideFromModelList.Should().BeTrue();
+        (await ModelIds()).Should().BeEquivalentTo("b/real-b", "ds4");
+        foreach (var inactive in new[] {
+            saved with { Enabled = false },
+            saved with { Targets = [saved.Targets[0] with { Enabled = false }, saved.Targets[1]] },
+            saved with { Targets = [saved.Targets[0] with { PluginKey = "another-plugin" }, saved.Targets[1]] }
+        })
+        {
+            (await client.PutAsJsonAsync($"/api/admin/model-mappings/{saved.Id}", inactive)).EnsureSuccessStatusCode();
+            (await ModelIds()).Should().Contain("a/real-a");
+        }
+        (await client.PutAsJsonAsync($"/api/admin/model-mappings/{saved.Id}", saved)).EnsureSuccessStatusCode();
+        await app.Services.GetRequiredService<RequestLogStore>().WriteAsync(new RequestLog
+        {
+            TraceId = "historical-before-restart", Platform = "history", Model = "old-model", Success = true,
+            StatusCode = 200, DurationMs = 2345, CreatedAt = DateTimeOffset.UtcNow.AddDays(-1)
+        });
+        var liveMetrics = app.Services.GetRequiredService<IRealtimeMetrics>();
+        liveMetrics.OnRequestStarted("live");
+        var dashboard = (await client.GetFromJsonAsync<DashboardMetrics>("/api/admin/dashboard?timezone=Asia%2FShanghai"))!;
+        dashboard.TotalRequests.Should().Be(1);
+        dashboard.RequestsToday.Should().Be(0);
+        dashboard.AverageLatencyMs.Should().Be(2345);
+        dashboard.ActiveRequests.Should().Be(1);
+        var legacyMetrics = (await client.GetFromJsonAsync<RealtimeSnapshot>("/api/admin/metrics"))!;
+        legacyMetrics.RequestsToday.Should().Be(0, "the process has no completed requests since restart");
+        legacyMetrics.ActiveConnections.Should().Be(1);
+        liveMetrics.OnRequestCompleted("live", 0, false, null);
+        (await client.GetFromJsonAsync<DashboardMetrics>("/api/admin/dashboard"))!.FailedRequests.Should().Be(0,
+            "historical totals come from persisted logs rather than process counters");
         client.DefaultRequestHeaders.Authorization = new("Bearer", apiKey);
         var requestNumber = 0;
         foreach (var endpoint in new[] { "/v1/chat/completions", "/v1/completions", "/v1/responses", "/v1/messages" })
@@ -134,6 +169,10 @@ public sealed class ModelMappingApiTests
             string[] expectedCalls = requestNumber++ < 3 ? ["a", "a", "b"] : ["b"];
             calls.Should().Equal(expectedCalls, "the fourth endpoint shares the target cooldown after three failed requests");
         }
+        calls.Clear();
+        (await client.PostAsJsonAsync("/v1/chat/completions", new { model = "a/real-a", messages = new[] { new { role = "user", content = "hello" } } }))
+            .StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        calls.Should().NotBeEmpty("hiding an original model does not disable its route");
         (await client.PutAsJsonAsync($"/api/admin/model-mappings/{saved.Id}", saved with { Enabled = false })).EnsureSuccessStatusCode();
         (await client.PostAsJsonAsync("/v1/chat/completions", new { model = "ds4", messages = Array.Empty<object>() })).StatusCode.Should().Be(HttpStatusCode.NotFound);
         (await client.DeleteAsync($"/api/admin/model-mappings/{saved.Id}")).EnsureSuccessStatusCode();

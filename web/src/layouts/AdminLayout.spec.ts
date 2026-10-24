@@ -30,6 +30,7 @@ afterEach(() => {
 })
 
 async function renderPlugins(initial: PluginDescriptor[], version: string | Error = '2.0.3') {
+  vi.spyOn(api, 'appearance').mockResolvedValue({ theme: 'minimal', colorMode: 'light' })
   let plugins = initial
   const getVersion = vi.spyOn(api, 'hostVersion')
   if (version instanceof Error) getVersion.mockRejectedValue(version)

@@ -21,6 +21,7 @@ import { useQuery } from '@tanstack/vue-query'
 import { api } from '@/services/api'
 import AdminNavigation, { type NavSection } from '@/components/AdminNavigation.vue'
 import BrandWordmark from '@/components/BrandWordmark.vue'
+import AppearanceModeToggle from '@/components/AppearanceModeToggle.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -102,6 +103,7 @@ async function signOut() {
           <NButton class="mobile-menu-button" quaternary circle aria-label="打开导航" @click="mobileMenuOpen = true">
             <template #icon><NIcon :component="MenuOutline" /></template>
           </NButton>
+          <AppearanceModeToggle />
           <div class="user-chip">
             <NAvatar round size="small" color="var(--avatar-background)" style="color: var(--avatar-foreground)">{{ currentUser?.userName?.slice(0, 1).toUpperCase() }}</NAvatar>
             <span>{{ currentUser?.userName }}</span>

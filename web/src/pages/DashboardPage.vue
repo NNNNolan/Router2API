@@ -16,7 +16,7 @@ import { useReducedMotion } from '@/composables/useReducedMotion'
 use([CanvasRenderer, BarChart, LineChart, GridComponent, LegendComponent, TooltipComponent])
 const reducedMotion = useReducedMotion()
 const themeVars = useThemeVars()
-const metricsQuery = useQuery({ queryKey: ['metrics'], queryFn: api.metrics, refetchInterval: 15_000 })
+const metricsQuery = useQuery({ queryKey: ['metrics'], queryFn: () => api.metrics({ timezone: Intl.DateTimeFormat().resolvedOptions().timeZone }), refetchInterval: 15_000 })
 const platformsQuery = useQuery({ queryKey: ['platforms'], queryFn: api.platforms })
 const trendQuery = useQuery({
   queryKey: ['dashboard-trend'],
@@ -42,16 +42,16 @@ const chartOption = computed<EChartsOption>(() => ({
   animation: !reducedMotion.value,
   animationDuration: 260,
   animationDurationUpdate: 180,
-  textStyle: { fontFamily: 'Inter, "PingFang SC", "Microsoft YaHei", sans-serif', color: '#667085' },
-  tooltip: { trigger: 'axis' },
-  legend: { top: 0, right: 0, icon: 'roundRect', itemWidth: 12, itemHeight: 4, textStyle: { color: '#667085', fontSize: 12 } },
+  textStyle: { fontFamily: 'Inter, "PingFang SC", "Microsoft YaHei", sans-serif', color: themeVars.value.textColor3 },
+  tooltip: { backgroundColor: themeVars.value.popoverColor, borderColor: themeVars.value.borderColor, textStyle: { color: themeVars.value.textColor2 }, trigger: 'axis' },
+  legend: { top: 0, right: 0, icon: 'roundRect', itemWidth: 12, itemHeight: 4, textStyle: { color: themeVars.value.textColor3, fontSize: 12 } },
   grid: { left: 8, right: 12, top: 42, bottom: 8, containLabel: true },
   xAxis: {
     type: 'category', boundaryGap: true,
     data: trendQuery.data.value?.buckets.map(bucket => new Date(bucket.startUtc).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })) ?? [],
-    axisLine: { lineStyle: { color: '#E4E7EC' } }, axisTick: { show: false }, axisLabel: { hideOverlap: true },
+    axisLine: { lineStyle: { color: themeVars.value.borderColor } }, axisTick: { show: false }, axisLabel: { hideOverlap: true },
   },
-  yAxis: { type: 'value', minInterval: 1, splitLine: { lineStyle: { color: '#EEF0F3', type: 'dashed' } } },
+  yAxis: { type: 'value', minInterval: 1, splitLine: { lineStyle: { color: themeVars.value.dividerColor, type: 'dashed' } } },
   series: [
     { name: '请求数', type: 'line', smooth: false, symbolSize: 5, data: trendQuery.data.value?.buckets.map(bucket => bucket.requests) ?? [], lineStyle: { width: 2, color: themeVars.value.primaryColor }, itemStyle: { color: themeVars.value.primaryColor }, areaStyle: { color: `${themeVars.value.primaryColor}0d` } },
     { name: '失败数', type: 'bar', barMaxWidth: 12, data: trendQuery.data.value?.buckets.map(bucket => bucket.failures) ?? [], itemStyle: { color: '#F97066', borderRadius: [3, 3, 0, 0] } },
@@ -89,7 +89,7 @@ async function refresh() {
     <NCard class="metric-card" :bordered="false">
       <div class="metric-label">今日请求<NIcon class="metric-icon" :component="PulseOutline" :size="18" /></div>
       <div class="metric-value">{{ metrics.requestsToday.toLocaleString() }}<small>次</small></div>
-      <p class="metric-note">累计 {{ metrics.totalRequests.toLocaleString() }} 次请求</p>
+      <p class="metric-note">已保留日志共 {{ metrics.totalRequests.toLocaleString() }} 次请求</p>
     </NCard>
     <NCard class="metric-card" :bordered="false">
       <div class="metric-label">累计成功率<NIcon class="metric-icon" :component="CheckmarkCircleOutline" :size="18" /></div>
@@ -99,12 +99,12 @@ async function refresh() {
     <NCard class="metric-card" :bordered="false">
       <div class="metric-label">平均延迟<NIcon class="metric-icon" :component="FlashOutline" :size="18" /></div>
       <div class="metric-value">{{ Math.round(metrics.averageLatencyMs).toLocaleString() }}<small>ms</small></div>
-      <p class="metric-note">全部请求的平均耗时</p>
+      <p class="metric-note">已完成请求的平均耗时</p>
     </NCard>
     <NCard class="metric-card" :bordered="false">
       <div class="metric-label">进行中请求<NIcon class="metric-icon" :component="SwapHorizontalOutline" :size="18" /></div>
       <div class="metric-value">{{ metrics.activeRequests }}<small>个</small></div>
-      <p class="metric-note">最近一分钟 {{ metrics.requestsPerMinute }} 次请求</p>
+      <p class="metric-note">最近一分钟完成 {{ metrics.requestsPerMinute }} 次请求</p>
     </NCard>
   </div>
   <div class="dashboard-grid">
@@ -134,7 +134,7 @@ async function refresh() {
     </NCard>
   </div>
   <NCard v-if="metrics" title="平台请求明细" class="dashboard-card" :bordered="false">
-    <template #header-extra><span class="card-caption">累计数据 · {{ updatedAt }} 更新</span></template>
+    <template #header-extra><span class="card-caption">已保留日志 · {{ updatedAt }} 更新</span></template>
     <NDataTable :columns="columns" :data="metrics.platforms" :bordered="false" :scroll-x="620"><template #empty><NEmpty description="暂无请求数据" /></template></NDataTable>
   </NCard>
 </template>

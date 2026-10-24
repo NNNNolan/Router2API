@@ -70,6 +70,17 @@ public sealed class ModelMappingTests : IDisposable
     }
 
     [TestMethod]
+    public void ModelListVisibilityPersistsAndLegacyTargetsRemainVisible()
+    {
+        var saved = Save([Target("a", 1) with { HideFromModelList = true }]);
+        new ModelMappingStore(_database, _health).Find("ds4")!.Targets[0].HideFromModelList.Should().BeTrue();
+        using var db = _database.CreateClient();
+        const string legacy = """[{"PluginKey":"a","Platform":"a","Model":"real-a","Enabled":true}]""";
+        db.Updateable<ModelMappingEntity>().SetColumns(row => row.TargetsJson == legacy).Where(row => row.Id == saved.Id).ExecuteCommand();
+        _store.Find("ds4")!.Targets[0].HideFromModelList.Should().BeFalse();
+    }
+
+    [TestMethod]
     public void StoreNormalizesLegacyZeroAttemptCountsOnSaveAndRead()
     {
         var saved = Save([Target("a", 0)]);

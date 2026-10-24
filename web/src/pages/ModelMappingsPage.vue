@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
-import { NAlert, NButton, NCard, NEmpty, NForm, NFormItem, NInput, NInputNumber, NModal, NPopconfirm, NSelect, NSpin, NSwitch, NTag, useMessage } from 'naive-ui'
+import { NAlert, NButton, NCard, NCheckbox, NEmpty, NForm, NFormItem, NInput, NInputNumber, NModal, NPopconfirm, NSelect, NSpin, NSwitch, NTag, useMessage } from 'naive-ui'
 import { api, type ModelMapping, type ModelMappingTarget } from '@/services/api'
 
 const message = useMessage()
@@ -30,7 +30,7 @@ function editableTarget(target: ModelMappingTarget): EditableTarget {
   const cooldownUnit = durationUnit(cooldownSeconds)
   return { ...values, cooldownValue: cooldownSeconds / cooldownUnit, cooldownUnit }
 }
-function blankTarget(): EditableTarget { return editableTarget({ pluginKey: '', platform: '', model: '', enabled: true, retryCount: null, failureThreshold: 3, cooldownSeconds: 300 }) }
+function blankTarget(): EditableTarget { return editableTarget({ pluginKey: '', platform: '', model: '', enabled: true, retryCount: null, failureThreshold: 3, cooldownSeconds: 300, hideFromModelList: false }) }
 function cooldownSummary(target: ModelMappingTarget) {
   if (target.failureThreshold === 0 || target.cooldownSeconds === 0) return '不自动冷却'
   const unit = durationUnit(target.cooldownSeconds)
@@ -166,6 +166,8 @@ async function remove(mapping: ModelMapping) {
                   </NFormItem>
                 </div>
                 <p class="mapping-help">{{ target.failureThreshold === 0 || target.cooldownValue === 0 ? '此目标不自动冷却。' : '连续失败达到设定轮数后暂停调用；轮数或时间为 0 时不冷却。' }}</p>
+                <NCheckbox v-model:checked="target.hideFromModelList" :disabled="locked" :aria-label="`目标 ${index + 1} 隐藏原模型`">从 /v1/models 隐藏原模型</NCheckbox>
+                <p class="mapping-help">只隐藏此目标的原始模型，映射名仍显示，直接调用不受影响。</p>
                 <p v-if="target.retryCount !== null" class="mapping-help">此目标最多调用 {{ target.retryCount }} 次，包含首次请求。</p>
                 <p v-if="target.platform && unavailable(target)" class="mapping-unavailable">此插件平台当前不可用，请求时会跳过。</p>
               </li>
@@ -198,7 +200,7 @@ async function remove(mapping: ModelMapping) {
         <ol class="mapping-route-list">
           <li v-for="(target, index) in mapping.targets" :key="index" :class="{ 'mapping-target-inactive': !target.enabled }">
             <span class="mapping-order">{{ index + 1 }}</span><div class="mapping-route-model"><code>{{ target.model }}</code><span>{{ target.pluginKey }} / {{ target.platform }}</span></div>
-            <div class="mapping-policy"><span class="mapping-retry">{{ target.retryCount === null ? '继承插件策略' : `最多尝试 ${target.retryCount} 次` }}</span><span class="mapping-cooldown">{{ cooldownSummary(target) }}</span></div>
+            <div class="mapping-policy"><span class="mapping-retry">{{ target.retryCount === null ? '继承插件策略' : `最多尝试 ${target.retryCount} 次` }}</span><span class="mapping-cooldown">{{ cooldownSummary(target) }}</span><span v-if="target.hideFromModelList" class="mapping-cooldown">模型列表隐藏原模型</span></div>
             <NTag v-if="!target.enabled" size="small">已停用</NTag><NTag v-else-if="unavailable(target)" type="warning" size="small">平台不可用</NTag>
           </li>
         </ol>
