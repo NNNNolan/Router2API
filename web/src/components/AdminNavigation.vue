@@ -1,46 +1,61 @@
 <script setup lang="ts">
-import { ref, type Component } from 'vue'
+import { onMounted, onUnmounted, ref, type Component } from 'vue'
+import { useRoute } from 'vue-router'
 import { NIcon } from 'naive-ui'
 import { ChevronDownOutline } from '@vicons/ionicons5'
 
-export type NavItem = { to: string; label: string; icon: Component; children?: NavItem[] }
-export type NavSection = { label: string; items: NavItem[] }
+export type NavItem = { to: string; label: string; icon?: Component; children?: NavItem[] }
+export type NavSection = { label: string; items: NavItem[]; to?: string }
 
 defineProps<{ sections: NavSection[]; label: string; id: string }>()
-defineEmits<{ navigate: [event: MouseEvent] }>()
+const emit = defineEmits<{ navigate: [event: MouseEvent] }>()
+const route = useRoute()
+const navigation = ref<HTMLElement>()
 
-const pluginsExpanded = ref(true)
-const animate = ref(true)
-
-function togglePlugins(event: MouseEvent) {
-  animate.value = event.detail > 0
-  pluginsExpanded.value = !pluginsExpanded.value
+function isActive(section: NavSection) {
+  return section.items.some(item => item.to === route.path || item.children?.some(child => child.to === route.path))
 }
+
+function closeMenus(event?: MouseEvent) {
+  for (const menu of navigation.value?.querySelectorAll('details') ?? []) {
+    if (!event || !menu.contains(event.target as Node)) menu.open = false
+  }
+}
+
+function navigate(event: MouseEvent) {
+  closeMenus()
+  emit('navigate', event)
+}
+
+function escapeMenu(event: KeyboardEvent) {
+  const menu = (event.target as HTMLElement).closest('details')
+  closeMenus()
+  menu?.querySelector('summary')?.focus()
+}
+
+onMounted(() => document.addEventListener('click', closeMenus))
+onUnmounted(() => document.removeEventListener('click', closeMenus))
 </script>
 
 <template>
-  <nav class="side-nav" :class="{ 'keyboard-navigation': !animate }" :aria-label="label" @keydown.capture="animate = false" @pointerdown.capture="animate = true">
-    <section v-for="section in sections" :key="section.label" class="nav-section" :aria-label="section.label">
-      <div class="nav-section-label">{{ section.label }}</div>
-      <div v-for="item in section.items" :key="item.to" class="nav-group">
-        <div class="nav-item">
-          <RouterLink :to="item.to" class="nav-link" @click="$emit('navigate', $event)">
-            <NIcon :component="item.icon" :size="18" />
-            <span>{{ item.label }}</span>
-          </RouterLink>
-          <button v-if="item.children?.length" class="nav-expand" type="button" :aria-label="`${pluginsExpanded ? '收起' : '展开'}插件页面`" :aria-expanded="pluginsExpanded" :aria-controls="`${id}-plugins`" @click="togglePlugins">
-            <NIcon :component="ChevronDownOutline" :size="14" :class="{ 'is-collapsed': !pluginsExpanded }" />
-          </button>
-        </div>
-        <Transition name="panel" :css="animate">
-          <div v-if="item.children?.length" v-show="pluginsExpanded" :id="`${id}-plugins`" class="nav-subnav">
-            <RouterLink v-for="child in item.children" :key="child.to" :to="child.to" class="nav-link nav-sublink" @click="$emit('navigate', $event)">
-              <span class="nav-child-dot" />
-              <span>{{ child.label }}</span>
+  <nav ref="navigation" class="admin-nav" :aria-label="label" @keydown.esc="escapeMenu">
+    <template v-for="section in sections" :key="section.label">
+      <RouterLink v-if="section.to" :to="section.to" class="nav-top-link" :class="{ 'is-active': isActive(section) }" @click="navigate">{{ section.label }}</RouterLink>
+      <details v-else class="nav-section" :class="{ 'is-active': isActive(section) }">
+        <summary :aria-controls="`${id}-${section.label}`">{{ section.label }}<NIcon :component="ChevronDownOutline" :size="12" /></summary>
+        <div :id="`${id}-${section.label}`" class="nav-menu">
+          <template v-for="item in section.items" :key="item.to">
+            <RouterLink :to="item.to" class="nav-link" @click="navigate">
+              <NIcon v-if="item.icon" :component="item.icon" :size="17" /><span>{{ item.label }}</span>
             </RouterLink>
-          </div>
-        </Transition>
-      </div>
-    </section>
+            <div v-if="item.children?.length" class="nav-subnav">
+              <RouterLink v-for="child in item.children" :key="child.to" :to="child.to" class="nav-link nav-sublink" @click="navigate">
+                <span class="nav-child-dot" /><span>{{ child.label }}</span>
+              </RouterLink>
+            </div>
+          </template>
+        </div>
+      </details>
+    </template>
   </nav>
 </template>

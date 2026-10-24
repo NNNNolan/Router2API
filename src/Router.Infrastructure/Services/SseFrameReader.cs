@@ -12,7 +12,6 @@ public sealed record SseFrame(string Data, string? Event = null, string? Id = nu
 public static class SseFrameReader
 {
     private static readonly Encoding StrictUtf8 = new UTF8Encoding(false, true);
-    private static readonly SseFrame Comment = new("", IsComment: true);
 
     /// <summary>逐帧读取，不关闭输入流；未以空行结束的 EOF 数据不伪装成完整事件。</summary>
     /// <param name="stream">上游响应流。</param>
@@ -32,59 +31,7 @@ public static class SseFrameReader
         using var reader = new StreamReader(stream, StrictUtf8, detectEncodingFromByteOrderMarks: false, leaveOpen: true);
         using var idle = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         var buffer = new char[4096];
-        var line = new ArrayBufferWriter<char>();
-        var data = new StringBuilder();
-        string? eventName = null;
-        string? lastId = null;
-        int? retry = null;
-        var frameBytes = 0;
-        var hasData = false;
-        var skipLf = false;
-        var firstCharacter = true;
-
-        SseFrame? ProcessLine()
-        {
-            var text = line.WrittenSpan;
-            line.ResetWrittenCount();
-            var bytes = Encoding.UTF8.GetByteCount(text);
-            if (bytes > maxFrameBytes) throw new InvalidDataException("SSE line exceeds its size limit.");
-            if (text.Length == 0)
-            {
-                var frame = hasData
-                    ? new SseFrame(data.ToString(0, data.Length - 1), eventName, lastId, retry)
-                    : null;
-                data.Clear();
-                hasData = false;
-                eventName = null;
-                frameBytes = 0;
-                return frame;
-            }
-            if (text[0] == ':') return Comment;
-            frameBytes += bytes + 1;
-            if (frameBytes > maxFrameBytes) throw new InvalidDataException("SSE frame exceeds its size limit.");
-            var colon = text.IndexOf(':');
-            var field = colon < 0 ? text : text[..colon];
-            var value = colon < 0 ? [] : text[(colon + 1)..];
-            if (value.StartsWith(' ')) value = value[1..];
-            switch (field)
-            {
-                case "data":
-                    data.Append(value).Append('\n');
-                    hasData = true;
-                    break;
-                case "event":
-                    eventName = value.Length == 0 ? null : value.ToString();
-                    break;
-                case "id" when !value.Contains('\0'):
-                    lastId = value.ToString();
-                    break;
-                case "retry" when IsAsciiDigits(value)
-                    && int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var milliseconds):
-                    retry = milliseconds;
-                    break;
-            }
-            return null;
-        }
+        var parser = new SseFrameParser(maxFrameBytes);
 
         while (true)
         {
@@ -99,28 +46,81 @@ public static class SseFrameReader
             if (count == 0) yield break;
             for (var index = 0; index < count; index++)
             {
-                var character = buffer[index];
-                if (firstCharacter)
-                {
-                    firstCharacter = false;
-                    if (character == '\ufeff') continue;
-                }
-                if (skipLf && character == '\n') { skipLf = false; continue; }
-                skipLf = false;
-                if (character is '\r' or '\n')
-                {
-                    skipLf = character == '\r';
-                    if (ProcessLine() is { } frame) yield return frame;
-                }
-                else
-                {
-                    line.GetSpan(1)[0] = character;
-                    line.Advance(1);
-                    // UTF-8 所需字节数不少于 UTF-16 代码单元数，因此也能限制尚未读完的行。
-                    if (line.WrittenCount > maxFrameBytes) throw new InvalidDataException("SSE line exceeds its size limit.");
-                }
+                if (parser.Feed(buffer[index]) is { } frame) yield return frame;
             }
         }
+    }
+
+}
+
+internal sealed class SseFrameParser(int maxFrameBytes)
+{
+    private static readonly SseFrame Comment = new("", IsComment: true);
+    private readonly ArrayBufferWriter<char> _line = new();
+    private readonly StringBuilder _data = new();
+    private string? _eventName;
+    private string? _lastId;
+    private int? _retry;
+    private int _frameBytes;
+    private bool _hasData;
+    private bool _skipLf;
+    private bool _firstCharacter = true;
+
+    public bool HasPendingData => _hasData || _line.WrittenCount != 0;
+
+    public SseFrame? Feed(char character)
+    {
+        if (_firstCharacter)
+        {
+            _firstCharacter = false;
+            if (character == '\ufeff') return null;
+        }
+        if (_skipLf && character == '\n') { _skipLf = false; return null; }
+        _skipLf = false;
+        if (character is '\r' or '\n')
+        {
+            _skipLf = character == '\r';
+            return ProcessLine();
+        }
+        _line.GetSpan(1)[0] = character;
+        _line.Advance(1);
+        if (_line.WrittenCount > maxFrameBytes) throw new InvalidDataException("SSE line exceeds its size limit.");
+        return null;
+    }
+
+    private SseFrame? ProcessLine()
+    {
+        var text = _line.WrittenSpan;
+        _line.ResetWrittenCount();
+        var bytes = Encoding.UTF8.GetByteCount(text);
+        if (bytes > maxFrameBytes) throw new InvalidDataException("SSE line exceeds its size limit.");
+        if (text.Length == 0)
+        {
+            var frame = _hasData ? new SseFrame(_data.ToString(0, _data.Length - 1), _eventName, _lastId, _retry) : null;
+            _data.Clear();
+            _hasData = false;
+            _eventName = null;
+            _frameBytes = 0;
+            return frame;
+        }
+        if (text[0] == ':') return Comment;
+        _frameBytes += bytes + 1;
+        if (_frameBytes > maxFrameBytes) throw new InvalidDataException("SSE frame exceeds its size limit.");
+        var colon = text.IndexOf(':');
+        var field = colon < 0 ? text : text[..colon];
+        var value = colon < 0 ? [] : text[(colon + 1)..];
+        if (value.StartsWith(' ')) value = value[1..];
+        switch (field)
+        {
+            case "data": _data.Append(value).Append('\n'); _hasData = true; break;
+            case "event": _eventName = value.Length == 0 ? null : value.ToString(); break;
+            case "id" when !value.Contains('\0'): _lastId = value.ToString(); break;
+            case "retry" when IsAsciiDigits(value)
+                && int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture, out var milliseconds):
+                _retry = milliseconds;
+                break;
+        }
+        return null;
     }
 
     private static bool IsAsciiDigits(ReadOnlySpan<char> value)

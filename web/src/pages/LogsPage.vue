@@ -26,9 +26,23 @@ function attemptTagType(attempt: NonNullable<RequestLog['attemptDetails']>[numbe
   return attempt.isTransportFailure ? 'warning' : 'error'
 }
 function attemptStatus(attempt: NonNullable<RequestLog['attemptDetails']>[number]) { return attempt.statusCode === null ? '未收到 HTTP 响应' : `HTTP ${attempt.statusCode}` }
+function sourceLabel(source?: string | null) {
+  return ({ plugin: '插件上报', response: '响应解析', estimated: '宿主估算', mixed: '混合来源', unknown: '来源未知' } as Record<string, string>)[source ?? 'unknown'] ?? '来源未知'
+}
+const tokenCount = (value?: number) => value === undefined ? '—' : value.toLocaleString('zh-CN')
 const rows = computed(() => query.data.value?.items ?? [])
 const columns: DataTableColumns<RequestLog> = [
-  { title: '时间', key: 'createdAt', render: row => new Date(row.createdAt).toLocaleString() }, { title: '平台', key: 'platform', render: row => row.platform || '—' }, { title: '模型', key: 'model', render: row => row.model || '—' }, { title: '状态码', key: 'statusCode' }, { title: '耗时', key: 'durationMs', render: row => `${row.durationMs} ms` }, { title: '结果', key: 'success', render: row => h(NTag, { type: row.success ? 'success' : row.cancelled ? 'warning' : 'error', round: true }, { default: () => row.success ? '成功' : row.cancelled ? '已取消' : '失败' }) }, { title: '详情', key: 'details', render: row => h(NButton, { size: 'small', secondary: true, onClick: () => openDetails(row) }, { default: () => row.attemptDetails?.length ? `查看 (${row.attemptDetails.length})` : '查看' }) },
+  { title: '时间', key: 'createdAt', width: 170, render: row => new Date(row.createdAt).toLocaleString() },
+  { title: '平台', key: 'platform', width: 100, ellipsis: { tooltip: true }, render: row => row.platform || '—' },
+  { title: '模型', key: 'model', width: 200, ellipsis: { tooltip: true }, render: row => row.model || '—' },
+  { title: '状态码', key: 'statusCode', width: 85 },
+  { title: '耗时', key: 'durationMs', width: 100, render: row => `${row.durationMs} ms` },
+  { title: '输入 Token', key: 'usage.promptTokens', width: 110, align: 'right', render: row => tokenCount(row.usage?.promptTokens) },
+  { title: '输出 Token', key: 'usage.completionTokens', width: 110, align: 'right', render: row => tokenCount(row.usage?.completionTokens) },
+  { title: '总 Token', key: 'usage.totalTokens', width: 110, align: 'right', render: row => tokenCount(row.usage?.totalTokens) },
+  { title: '用量来源', key: 'usageMetadata', width: 150, render: row => h(NTag, { size: 'small', bordered: false, type: row.usageMetadata?.source === 'estimated' || row.usageMetadata?.source === 'mixed' ? 'warning' : 'default' }, { default: () => `${sourceLabel(row.usageMetadata?.source)}${row.usageMetadata?.isPartial ? ' · 部分' : ''}` }) },
+  { title: '结果', key: 'success', width: 85, render: row => h(NTag, { type: row.success ? 'success' : row.cancelled ? 'warning' : 'error', round: true }, { default: () => row.success ? '成功' : row.cancelled ? '已取消' : '失败' }) },
+  { title: '详情', key: 'details', width: 95, render: row => h(NButton, { size: 'small', secondary: true, onClick: () => openDetails(row) }, { default: () => row.attemptDetails?.length ? `查看 (${row.attemptDetails.length})` : '查看' }) },
 ]
 </script>
 <template>
@@ -38,6 +52,14 @@ const columns: DataTableColumns<RequestLog> = [
   <NModal v-model:show="detailVisible" preset="card" class="request-detail-modal" :title="selectedLog ? `${selectedLog.model || '模型请求'} · 请求详情` : '请求详情'" style="width: min(820px, calc(100vw - 32px)); height: min(640px, calc(100dvh - 32px)); max-height: calc(100dvh - 32px);">
     <div v-if="selectedLog" class="request-detail">
       <div class="request-detail-meta"><span>TraceId <code>{{ selectedLog.traceId }}</code></span><span>宿主 {{ selectedLog.durationMs }} ms · 上游 {{ selectedAttemptDuration }} ms · {{ new Date(selectedLog.createdAt).toLocaleString() }}</span><NTag v-if="selectedLog.cancelled" type="warning" size="small" round>调用方已取消</NTag></div>
+      <div class="request-usage-summary">
+        <span>输入 <strong>{{ tokenCount(selectedLog.usage?.promptTokens) }}</strong></span>
+        <span>输出 <strong>{{ tokenCount(selectedLog.usage?.completionTokens) }}</strong></span>
+        <span>合计 <strong>{{ tokenCount(selectedLog.usage?.totalTokens) }}</strong> Token</span>
+        <span>{{ sourceLabel(selectedLog.usageMetadata?.source) }}<template v-if="selectedLog.usageMetadata?.isPartial"> · 仅记录已观察部分</template></span>
+      </div>
+      <p v-if="selectedLog.usageMetadata" class="usage-note">输入：{{ sourceLabel(selectedLog.usageMetadata.inputSource) }} · 输出：{{ sourceLabel(selectedLog.usageMetadata.outputSource) }} · 合计：{{ sourceLabel(selectedLog.usageMetadata.totalSource) }}<template v-if="selectedLog.usageMetadata.algorithm"> · 算法 {{ selectedLog.usageMetadata.algorithm }}</template></p>
+      <NAlert v-if="selectedLog.usageMetadata?.warning" type="warning" :title="selectedLog.usageMetadata.warning">用量观察不完整，统计可能仅包含部分消耗。</NAlert>
       <NEmpty v-if="!selectedAttempts.length" :description="emptyAttemptHint" />
       <div v-else class="request-attempt-list" role="list">
         <div class="request-attempt-list-header" aria-hidden="true"><span>尝试</span><span>代理</span><span>状态</span><span>结果</span><span>耗时</span></div>

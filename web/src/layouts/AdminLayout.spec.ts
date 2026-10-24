@@ -46,7 +46,7 @@ async function renderPlugins(initial: PluginDescriptor[], version: string | Erro
     history: createMemoryHistory(),
     routes: [
       { path: '/plugins', component: PluginsPage },
-      { path: '/:pathMatch(.*)*', component: { template: '<div />' } },
+      { path: '/:pathMatch(.*)*', component: { template: '<div data-route-page>目标页面</div>' } },
     ],
   })
   await router.push('/plugins')
@@ -57,6 +57,7 @@ async function renderPlugins(initial: PluginDescriptor[], version: string | Erro
       plugins: [router, [VueQueryPlugin, { queryClient }]],
       renderStubDefaultSlot: true,
       stubs: {
+        Transition: false,
         ...Object.fromEntries([
           'NAvatar', 'NDrawer', 'NDrawerContent', 'NIcon', 'NLayout', 'NLayoutContent', 'NLayoutHeader', 'NLayoutSider',
           'NAlert', 'NCard', 'NCheckbox', 'NDataTable', 'NEmpty', 'NInput', 'NModal', 'NPopconfirm', 'NSelect',
@@ -83,21 +84,33 @@ function expectMenus(keys: string[]) {
   }
 }
 
-describe('插件侧栏菜单', () => {
-  it('两端导航分组一致，折叠插件页面保留管理入口并更新可访问状态', async () => {
+describe('顶部和移动端导航', () => {
+  it('键盘导航连续切换页面时内容不会因过渡状态变化而丢失', async () => {
+    const { view } = await renderPlugins([plugin('active')])
+    for (const path of ['/accounts', '/analytics', '/plugins', '/models', '/model-mappings', '/logs', '/plugin-logs', '/task-logs', '/']) {
+      await view.get(`.desktop-navigation a[href="${path}"]`).trigger('click')
+      await flushPromises()
+      await vi.waitFor(() => expect(view.find(path === '/plugins' ? '.plugin-card' : '[data-route-page]').exists()).toBe(true))
+    }
+  })
+
+  it('两端分组一致，Escape 关闭菜单且管理入口和动态插件均可访问', async () => {
     const { view } = await renderPlugins([plugin('active')])
     for (const label of ['主导航', '移动端主导航']) {
       const nav = view.get(`nav[aria-label="${label}"]`)
-      expect(nav.findAll('.nav-section-label').map(item => item.text())).toEqual(['工作台', '资源管理', '运行诊断', '系统'])
-      const toggle = nav.get('button[aria-controls]')
-      const childrenId = `#${toggle.attributes('aria-controls')}`
-      await toggle.trigger('click')
-      expect(toggle.attributes('aria-expanded')).toBe('false')
-      expect(nav.get(childrenId).isVisible()).toBe(false)
-      expect(nav.get('a[href="/plugins"]').isVisible()).toBe(true)
-      await toggle.trigger('click')
-      expect(toggle.attributes('aria-expanded')).toBe('true')
-      expect(nav.get(childrenId).isVisible()).toBe(true)
+      expect(nav.findAll('summary').map(item => item.text())).toEqual(['总览', '模型', '资源', '插件', '日志', '系统'])
+      const sections = nav.findAll('details')
+      expect(sections.find(section => section.get('summary').text() === '总览')!.findAll('a').map(link => link.attributes('href'))).toEqual(['/', '/analytics'])
+      expect(sections.find(section => section.get('summary').text() === '日志')!.findAll('a').map(link => link.attributes('href'))).toEqual(['/logs', '/plugin-logs', '/task-logs'])
+      expect(sections.find(section => section.get('summary').text() === '系统')!.findAll('a').map(link => link.attributes('href'))).toEqual(['/test', '/settings/config'])
+      expect(nav.find('a[href="/models"]').text()).toContain('模型广场')
+      expect(nav.find('a[href="/model-mappings"]').text()).toContain('模型映射')
+      const menu = nav.findAll('details').find(item => item.text().includes('插件管理'))!
+      ;(menu.element as HTMLDetailsElement).open = true
+      expect(menu.find('a[href="/plugins"]').exists()).toBe(true)
+      expect(menu.find('a[href="/plugins/active"]').exists()).toBe(true)
+      await menu.get('summary').trigger('keydown', { key: 'Escape' })
+      expect((menu.element as HTMLDetailsElement).open).toBe(false)
     }
   })
 

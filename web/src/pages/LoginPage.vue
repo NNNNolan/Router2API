@@ -2,7 +2,8 @@
 import { ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useMessage, NButton, NCard, NCheckbox, NForm, NFormItem, NIcon, NInput } from 'naive-ui'
-import { ArrowForwardOutline, GitNetworkOutline, LockClosedOutline } from '@vicons/ionicons5'
+import { ArrowForwardOutline, LockClosedOutline } from '@vicons/ionicons5'
+import BrandWordmark from '@/components/BrandWordmark.vue'
 import { ApiError } from '@/services/api'
 import { useAuth } from '@/stores/auth'
 
@@ -75,8 +76,7 @@ async function submit() {
   <main class="login-page">
     <section class="login-panel" aria-labelledby="login-title">
       <div class="login-brand">
-        <div class="brand-mark large"><NIcon :component="GitNetworkOutline" :size="26" /></div>
-        <span>Router2API</span>
+        <BrandWordmark />
       </div>
       <NCard class="login-card" :bordered="false">
         <div class="login-heading">

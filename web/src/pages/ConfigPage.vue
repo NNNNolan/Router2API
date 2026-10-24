@@ -1,15 +1,17 @@
 <script setup lang="ts">
 import { reactive, ref, watch } from 'vue'
-import { useQuery } from '@tanstack/vue-query'
+import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { NAlert, NButton, NCard, NForm, NFormItem, NInput, NInputNumber, NSelect, NSpin, NSwitch, useMessage } from 'naive-ui'
-import { api } from '@/services/api'
+import { api, type AppearanceTheme } from '@/services/api'
 
 const message = useMessage()
+const queryClient = useQueryClient()
 const query = useQuery({ queryKey: ['config'], queryFn: api.config })
 const saving = ref(false)
 const refreshingProtocols = ref(false)
 const protocolsUpdatedAt = ref('')
 const form = reactive({
+  theme: 'minimal' as AppearanceTheme,
   adminEnabled: true,
   sessionLifetimeHours: 12,
   apiKeyEnabled: true,
@@ -24,6 +26,7 @@ const form = reactive({
 
 watch(() => query.data.value, value => {
   if (!value) return
+  form.theme = value.appearance.theme
   form.adminEnabled = value.auth.adminEnabled
   form.sessionLifetimeHours = value.auth.sessionLifetimeHours
   form.apiKeyEnabled = value.auth.apiKeyEnabled
@@ -38,7 +41,8 @@ watch(() => query.data.value, value => {
 async function save() {
   saving.value = true
   try {
-    await api.saveConfig({
+    const saved = await api.saveConfig({
+      appearance: { theme: form.theme },
       auth: {
         enabled: form.adminEnabled,
         sessionLifetimeHours: form.sessionLifetimeHours,
@@ -48,6 +52,7 @@ async function save() {
       redis: { connectionString: form.redisConnectionString.trim(), instanceName: form.redisInstanceName },
       logging: { dataRetentionDays: form.dataRetentionDays, cleanupCron: form.cleanupCron.trim(), minimumPluginLogLevel: form.minimumPluginLogLevel },
     })
+    queryClient.setQueryData(['appearance'], saved.appearance)
     form.apiKey = ''
     await query.refetch()
     message.success('配置已保存到 Config.json')
@@ -89,6 +94,17 @@ async function refreshProtocols() {
     <NAlert v-else-if="query.isError.value" type="error" title="配置读取失败">请刷新页面后重试。</NAlert>
     <NForm v-else label-placement="top" class="config-form">
       <div class="config-grid">
+        <NCard title="界面主题" :bordered="false" class="settings-card config-card">
+          <template #header-extra><span class="config-kicker">APPEARANCE</span></template>
+          <NFormItem label="主题风格">
+            <NSelect v-model:value="form.theme" :options="[{ label: '极简 · 黑白（默认）', value: 'minimal' }, { label: '蓝色', value: 'default' }]" :input-props="{ 'aria-label': '主题风格' }" />
+          </NFormItem>
+          <div class="theme-preview" :class="`theme-preview-${form.theme}`" aria-hidden="true">
+            <span class="theme-preview-title">{{ form.theme === 'minimal' ? '极简主题' : '蓝色主题' }}</span>
+            <span class="theme-preview-button">主按钮</span>
+          </div>
+          <p class="field-help">{{ form.theme === 'minimal' ? '白色背景、黑色按钮、细线分隔，减少阴影与装饰。' : '保留现有蓝色强调色与浅灰背景。' }}保存后立即应用，其他浏览器刷新后同步。</p>
+        </NCard>
         <NCard title="访问控制" :bordered="false" class="settings-card config-card">
           <template #header-extra><span class="config-kicker">AUTH</span></template>
           <NFormItem label="管理员会话">

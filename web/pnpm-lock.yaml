@@ -109,6 +109,9 @@ importers:
 
   .:
     dependencies:
+      '@lobehub/icons-static-svg':
+        specifier: 1.95.1
+        version: 1.95.1
       '@tanstack/vue-query':
         specifier: ^5.103.1
         version: 5.103.1(vue@3.5.43(typescript@5.9.3))
@@ -269,6 +272,9 @@ packages:
 
   '@juggle/resize-observer@3.4.0':
     resolution: {integrity: sha512-dfLbk+PwWvFzSxwk3n5ySL0hfBog779o8h68wK/7/APo/7cgyWp5jcXockbxdk5kFRkbeXWm4Fbi9FrdN381sA==}
+
+  '@lobehub/icons-static-svg@1.95.1':
+    resolution: {integrity: sha512-Hw7EPPgVnC4NZLXBfTNJG6hyQgqECfUPC11VVXodPSr1aebKcFxDZlSpxhWwYNdCc6bhxps/x5TtXoPmfKH2ag==}
 
   '@one-ini/wasm@0.2.1':
     resolution: {integrity: sha512-TUqERXGNTifZ9y2g3wPxQrw3HpHv/02DsW3D90T9x0hhonrL1ZqpSmNrU2XkoIq0fP1N6gZfVQzy2Fw1ZvGBNg==}
@@ -1332,6 +1338,8 @@ snapshots:
       '@jridgewell/sourcemap-codec': 1.6.0
 
   '@juggle/resize-observer@3.4.0': {}
+
+  '@lobehub/icons-static-svg@1.95.1': {}
 
   '@one-ini/wasm@0.2.1': {}
 

@@ -28,14 +28,15 @@ public sealed class ConfigFileService(
     IOptionsMonitor<LogRetentionOptions> retention,
     IOptionsMonitor<PluginLogOptions> pluginLogs,
     ApiKeyService apiKeys,
-    ILogger<ConfigFileService> logger) : IConfigFileService
+    ILogger<ConfigFileService> logger,
+    IOptionsMonitor<AppearanceOptions> appearance) : IConfigFileService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         WriteIndented = true
     };
 
-    public string FilePath { get; } = Path.Combine(
+    public string FilePath { get; init; } = Path.Combine(
         Directory.GetCurrentDirectory(),
         "Config",
         "Config.json");
@@ -57,7 +58,8 @@ public sealed class ConfigFileService(
             new ConfigLoggingSnapshot(
                 retention.CurrentValue.DataRetentionDays,
                 retention.CurrentValue.CleanupCron,
-                pluginLogs.CurrentValue.MinimumPluginLogLevel));
+                pluginLogs.CurrentValue.MinimumPluginLogLevel),
+            new ConfigAppearanceSnapshot(appearance.CurrentValue.Theme));
 
     public void EnsureCreated()
     {
@@ -75,6 +77,9 @@ public sealed class ConfigFileService(
     {
         ArgumentNullException.ThrowIfNull(request);
         cancellationToken.ThrowIfCancellationRequested();
+
+        if (request.Appearance is { } appearanceUpdate && !AppearanceOptions.IsSupported(appearanceUpdate.Theme))
+            throw new ArgumentException("主题只能是 default（蓝色）或 minimal（黑白极简）。", nameof(request));
 
         if (request.Auth is not null)
         {
@@ -130,6 +135,9 @@ public sealed class ConfigFileService(
             loggingNode["MinimumPluginLogLevel"] = loggingUpdate.MinimumPluginLogLevel;
         }
 
+        if (request.Appearance is { } appearanceSettings)
+            GetOrCreateObject(root, "Appearance")["Theme"] = appearanceSettings.Theme;
+
         Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
         WriteJson(root);
         ReloadConfiguration();
@@ -159,7 +167,8 @@ public sealed class ConfigFileService(
                 ["DataRetentionDays"] = retention.CurrentValue.DataRetentionDays,
                 ["CleanupCron"] = retention.CurrentValue.CleanupCron,
                 ["MinimumPluginLogLevel"] = pluginLogs.CurrentValue.MinimumPluginLogLevel
-            }
+            },
+            ["Appearance"] = new JsonObject { ["Theme"] = appearance.CurrentValue.Theme }
         };
 
     private JsonObject ReadDocument()
@@ -204,7 +213,8 @@ public sealed record ConfigSnapshot(
     ConfigAuthSnapshot Auth,
     ConfigDatabaseSnapshot Database,
     ConfigRedisSnapshot Redis,
-    ConfigLoggingSnapshot Logging);
+    ConfigLoggingSnapshot Logging,
+    ConfigAppearanceSnapshot Appearance);
 
 public sealed record ConfigAuthSnapshot(
     bool AdminEnabled,
@@ -220,12 +230,24 @@ public sealed record ConfigRedisSnapshot(string ConnectionString, string Instanc
 
 public sealed record ConfigLoggingSnapshot(int DataRetentionDays, string CleanupCron, string MinimumPluginLogLevel);
 
+/// <summary>允许前端读取的主题设置，不包含宿主配置的其他内容。</summary>
+public sealed record ConfigAppearanceSnapshot(string Theme);
+
 public sealed class ConfigUpdateRequest
 {
     public ConfigAuthUpdate? Auth { get; init; }
     public ConfigDatabaseUpdate? Database { get; init; }
     public ConfigRedisUpdate? Redis { get; init; }
     public ConfigLoggingUpdate? Logging { get; init; }
+    /// <summary>可选的界面主题变更；省略时保留已有设置。</summary>
+    public ConfigAppearanceUpdate? Appearance { get; init; }
+}
+
+/// <summary>管理员保存的界面主题标识，由宿主校验允许列表。</summary>
+public sealed class ConfigAppearanceUpdate
+{
+    /// <summary>必须明确指定已实现的主题。</summary>
+    public string? Theme { get; init; }
 }
 
 public sealed class ConfigAuthUpdate

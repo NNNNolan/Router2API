@@ -26,7 +26,7 @@ public sealed class PluginAttemptExecutor(
     PluginResiliencePipelines resilience,
     IOptions<PluginExecutionOptions> executionOptions) : IPluginAttemptExecutor
 {
-    public async Task<PluginInvocationResult> ExecuteAsync(
+    public Task<PluginInvocationResult> ExecuteAsync(
         string pluginKey,
         string platformName,
         IPlatformTerminal terminal,
@@ -34,30 +34,58 @@ public sealed class PluginAttemptExecutor(
         string traceId,
         TestOverrides? overrides,
         CancellationToken cancellationToken = default)
+        => ExecuteCoreAsync(pluginKey, platformName, terminal, request, traceId, overrides, null, null, cancellationToken);
+
+    /// <summary>执行一个映射目标，只覆盖本次尝试预算，保留插件的错误决策和资源策略。</summary>
+    /// <param name="pluginKey">目标插件。</param>
+    /// <param name="platformName">目标平台。</param>
+    /// <param name="terminal">当前平台终端。</param>
+    /// <param name="request">目标独立请求。</param>
+    /// <param name="traceId">原请求跟踪 ID。</param>
+    /// <param name="overrides">管理员测试覆盖。</param>
+    /// <param name="attemptCount">包含首次请求的总尝试次数；为空则继承插件声明。</param>
+    /// <param name="setupBudget">整条映射剩余的建立响应预算。</param>
+    /// <param name="cancellationToken">调用方取消令牌。</param>
+    /// <returns>完整响应及该目标的尝试明细。</returns>
+    public Task<PluginInvocationResult> ExecuteMappedAsync(
+        string pluginKey, string platformName, IPlatformTerminal terminal, AdapterRequest request, string traceId,
+        TestOverrides? overrides, int? attemptCount, TimeSpan setupBudget, CancellationToken cancellationToken = default)
+    {
+        if (attemptCount is < 1 or > 35) throw new ArgumentOutOfRangeException(nameof(attemptCount));
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(setupBudget, TimeSpan.Zero);
+        return ExecuteCoreAsync(pluginKey, platformName, terminal, request, traceId, overrides,
+            attemptCount, setupBudget, cancellationToken);
+    }
+
+    /// <summary>读取宿主当前 attempt client 的实际预算，供 JS 防止业务与传输重试叠加；不改变公开插件契约。</summary>
+    public static int? GetAttemptLimit(IPluginHttpClient client) => (client as PluginHttpClient)?.MaxAttempts;
+
+    private async Task<PluginInvocationResult> ExecuteCoreAsync(
+        string pluginKey, string platformName, IPlatformTerminal terminal, AdapterRequest request, string traceId,
+        TestOverrides? overrides, int? maxAttempts, TimeSpan? setupBudget, CancellationToken cancellationToken)
     {
         var totalStopwatch = Stopwatch.StartNew();
-        await TryWriteLogAsync(new PluginLog
-        {
-            PluginKey = pluginKey,
-            Platform = platformName,
-            EventType = "request.started",
-            Message = "plugin request attempt sequence started",
-            TraceId = traceId,
-            Model = request.Model,
-            Level = "Debug"
-        });
-
-        await ClampReasoningAsync(platformName, request, cancellationToken);
         var snapshot = policyRegistry.GetSnapshot(pluginKey, platformName);
-        var policyOptions = snapshot.Attempts;
+        var policyOptions = maxAttempts is { } limit ? snapshot.Attempts with { MaxAttempts = limit } : snapshot.Attempts;
         var accountPolicy = snapshot.Accounts;
         var attemptDetails = new List<RequestAttemptDetail>();
-        using var invocation = new PluginInvocationScope(policyOptions, executionOptions.Value, cancellationToken);
+        using var invocation = new PluginInvocationScope(policyOptions, executionOptions.Value, cancellationToken, setupBudget);
         var resilienceContext = ResilienceContextPool.Shared.Get(invocation.Token);
         resilienceContext.Properties.Set(PluginResiliencePipelines.AttemptRetries, Math.Clamp(policyOptions.MaxAttempts - 1, 0, 34));
 
         try
         {
+            await TryWriteLogAsync(new PluginLog
+            {
+                PluginKey = pluginKey,
+                Platform = platformName,
+                EventType = "request.started",
+                Message = "plugin request attempt sequence started",
+                TraceId = traceId,
+                Model = request.Model,
+                Level = "Debug"
+            });
+            await ClampReasoningAsync(platformName, request, invocation.Token);
             var result = await resilience.Attempts.ExecuteAsync(
                 async ctx => await ExecuteAttemptAsync(
                     pluginKey,
@@ -140,7 +168,9 @@ public sealed class PluginAttemptExecutor(
             });
             return new PluginInvocationResult(
                 AdapterResponse.ServerError("upstream request timed out"),
-                new PluginAttemptResult(PluginAttemptOutcome.NoPenalty, Reason: "timeout"),
+                setupBudget.HasValue
+                    ? new PluginAttemptDecision { FailureKind = PluginFailureKind.Upstream, Retry = PluginRetryAction.NextAttempt, ReasonCode = "setup-timeout" }.ToResult(reason: "timeout")
+                    : new PluginAttemptResult(PluginAttemptOutcome.NoPenalty, Reason: "timeout"),
                 attemptDetails.ToArray());
         }
         catch (PluginInputTooLargeException exception)
@@ -243,7 +273,7 @@ public sealed class PluginAttemptExecutor(
     {
         var accountCandidates = await GetAccountsAsync(pluginKey, platformName, request, overrides, accountPolicy, cancellationToken);
         if (accountCandidates.Count == 0)
-            return Failure("no account available", PluginAttemptOutcome.NoPenalty);
+            return Failure("no account available", PluginAttemptOutcome.NoPenalty, "no-account");
 
         ResourceLeaseResult<Account>? accountLease = null;
         PluginHttpClient? client = null;
@@ -258,7 +288,7 @@ public sealed class PluginAttemptExecutor(
                 TimeSpan.FromMilliseconds(500),
                 cancellationToken);
             if (accountLease is null)
-                return Failure("no account lease available", PluginAttemptOutcome.Retry);
+                return Failure("no account lease available", PluginAttemptOutcome.Retry, "no-account-lease");
 
             attemptTimeout = invocation.CreateAttemptTimeout();
             var bodyPhase = 0;
@@ -274,7 +304,7 @@ public sealed class PluginAttemptExecutor(
                 {
                     if (response.IsSuccessStatusCode
                         && string.Equals(response.Content.Headers.ContentType?.MediaType, "text/event-stream", StringComparison.OrdinalIgnoreCase)) BeginBody();
-                });
+                }, policy.MaxAttempts);
 
             var attemptStopwatch = Stopwatch.StartNew();
             PluginInvocationResult result;
@@ -632,8 +662,13 @@ public sealed class PluginAttemptExecutor(
         }
     }
 
-    private static PluginInvocationResult Failure(string error, PluginAttemptOutcome outcome)
+    private static PluginInvocationResult Failure(string error, PluginAttemptOutcome outcome, string reasonCode)
         => new(
             AdapterResponse.ServerError(error),
-            new PluginAttemptResult(outcome, Reason: error));
+            new PluginAttemptDecision
+            {
+                FailureKind = PluginFailureKind.Upstream,
+                Retry = outcome == PluginAttemptOutcome.Retry ? PluginRetryAction.NextAttempt : PluginRetryAction.None,
+                ReasonCode = reasonCode
+            }.ToResult(reason: error));
 }

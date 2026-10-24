@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, h } from 'vue'
 import { useQuery } from '@tanstack/vue-query'
-import { NAlert, NButton, NCard, NDataTable, NEmpty, NIcon, NSpin, NTag } from 'naive-ui'
+import { NAlert, NButton, NCard, NDataTable, NEmpty, NIcon, NSpin, NTag, useThemeVars } from 'naive-ui'
 import type { DataTableColumns } from 'naive-ui'
 import { ArrowForwardOutline, CheckmarkCircleOutline, FlashOutline, PulseOutline, RefreshOutline, SwapHorizontalOutline } from '@vicons/ionicons5'
 import VChart from 'vue-echarts'
@@ -15,6 +15,7 @@ import { useReducedMotion } from '@/composables/useReducedMotion'
 
 use([CanvasRenderer, BarChart, LineChart, GridComponent, LegendComponent, TooltipComponent])
 const reducedMotion = useReducedMotion()
+const themeVars = useThemeVars()
 const metricsQuery = useQuery({ queryKey: ['metrics'], queryFn: api.metrics, refetchInterval: 15_000 })
 const platformsQuery = useQuery({ queryKey: ['platforms'], queryFn: api.platforms })
 const trendQuery = useQuery({
@@ -52,7 +53,7 @@ const chartOption = computed<EChartsOption>(() => ({
   },
   yAxis: { type: 'value', minInterval: 1, splitLine: { lineStyle: { color: '#EEF0F3', type: 'dashed' } } },
   series: [
-    { name: '请求数', type: 'line', smooth: false, symbolSize: 5, data: trendQuery.data.value?.buckets.map(bucket => bucket.requests) ?? [], lineStyle: { width: 2, color: '#2563EB' }, itemStyle: { color: '#2563EB' }, areaStyle: { color: 'rgba(37, 99, 235, .05)' } },
+    { name: '请求数', type: 'line', smooth: false, symbolSize: 5, data: trendQuery.data.value?.buckets.map(bucket => bucket.requests) ?? [], lineStyle: { width: 2, color: themeVars.value.primaryColor }, itemStyle: { color: themeVars.value.primaryColor }, areaStyle: { color: `${themeVars.value.primaryColor}0d` } },
     { name: '失败数', type: 'bar', barMaxWidth: 12, data: trendQuery.data.value?.buckets.map(bucket => bucket.failures) ?? [], itemStyle: { color: '#F97066', borderRadius: [3, 3, 0, 0] } },
   ],
 }))
@@ -75,6 +76,12 @@ async function refresh() {
       <RouterLink to="/analytics" class="dashboard-link">查看分析<NIcon :component="ArrowForwardOutline" /></RouterLink>
       <NButton secondary :loading="refreshing" @click="refresh"><template #icon><NIcon :component="RefreshOutline" /></template>刷新</NButton>
     </div>
+  </div>
+  <div v-if="trendQuery.isSuccess.value" class="metrics-grid usage-metrics mb-20">
+    <NCard v-for="item in [{ label: '今日输入 Token', value: trendQuery.data.value?.inputTokens }, { label: '今日输出 Token', value: trendQuery.data.value?.outputTokens }, { label: '今日总 Token', value: trendQuery.data.value?.tokens }]" :key="item.label" :bordered="false" class="usage-token-card">
+      <div class="metric-label">{{ item.label }}</div><div class="usage-token-value">{{ item.value === undefined ? '—' : item.value.toLocaleString('zh-CN') }}</div>
+    </NCard>
+    <NCard :bordered="false" class="usage-token-card"><div class="metric-label">用量记录</div><RouterLink class="dashboard-link usage-token-link" to="/analytics">查看输入与输出分析<NIcon :component="ArrowForwardOutline" /></RouterLink><p class="metric-note">{{ trendQuery.data.value?.estimatedRequests ?? '—' }} 次含估算 · {{ trendQuery.data.value?.partialRequests ?? '—' }} 次不完整 · {{ trendQuery.data.value?.unknownUsageRequests ?? '—' }} 次来源未知</p></NCard>
   </div>
   <NAlert v-if="metricsQuery.isError.value" type="error" title="指标暂时不可用" class="mb-20">无法读取服务指标，请重试或检查服务连接。<span v-if="metrics">下方保留上次获取的数据。</span></NAlert>
   <NSpin v-if="metricsQuery.isPending.value" size="large" class="center-spin" />

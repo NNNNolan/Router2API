@@ -271,7 +271,7 @@ public sealed class StreamLifecycleTests
         var metrics = new RealtimeMetrics();
         var logs = new Mock<ILogSink<RequestLog>>();
         var pipeline = new RouterPipeline(new ModelRouter(platforms), platforms, executor.Object, metrics,
-            logs.Object, Mock.Of<IUsageBucketStore>(), NullLogger<RouterPipeline>.Instance);
+            logs.Object, Mock.Of<IUsageBucketStore>(), NullLogger<RouterPipeline>.Instance, new ModelMappingHealth());
         var context = new RequestContext { Request = new AdapterRequest { Model = "test/model", Stream = true } };
 
         await pipeline.ExecuteAsync(context);

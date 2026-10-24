@@ -13,10 +13,11 @@ internal sealed class PluginInvocationScope : IDisposable
     private int _bodyPhase;
     private bool _transferred;
 
-    public PluginInvocationScope(PluginProxyPolicy policy, PluginExecutionOptions options, CancellationToken token)
+    public PluginInvocationScope(PluginProxyPolicy policy, PluginExecutionOptions options, CancellationToken token, TimeSpan? setupBudget = null)
     {
         _operation = CancellationTokenSource.CreateLinkedTokenSource(token);
-        _operation.CancelAfter(Min(policy.TotalTimeout, options.TotalSetupTimeout));
+        var setupTimeout = Min(policy.TotalTimeout, options.TotalSetupTimeout);
+        _operation.CancelAfter(setupBudget is { } budget && budget < setupTimeout ? budget : setupTimeout);
         _attemptTimeout = Min(policy.AttemptTimeout, options.SetupTimeout);
         _responseTimeout = options.ResponseTimeout;
     }

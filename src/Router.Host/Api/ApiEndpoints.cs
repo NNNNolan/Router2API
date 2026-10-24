@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Security.Cryptography;
 using System.Reflection;
+using Microsoft.Extensions.Options;
 using Router.Contracts.Domain;
 using Router.Contracts.Host;
 using Router.Contracts.Pipeline;
@@ -9,6 +10,7 @@ using Router.Host.Pipeline;
 using Router.Host.Plugins;
 using Router.Host.Security;
 using Router.Host.Tracing;
+using Router.Infrastructure.Services;
 
 namespace Router.Host.Api;
 
@@ -17,6 +19,13 @@ public static class ApiEndpoints
 {
     public static void Map(WebApplication app)
     {
+        ModelMappingEndpoints.Map(app);
+        // 登录页也需要主题，只公开经过校验的主题名，不读取管理员配置快照。
+        app.MapGet("/api/appearance", (IOptionsMonitor<AppearanceOptions> options, HttpContext context) =>
+        {
+            context.Response.Headers.CacheControl = "no-store";
+            return Results.Ok(new ConfigAppearanceSnapshot(options.CurrentValue.Theme));
+        });
         app.MapPost("/api/admin/login", LoginAsync);
         app.MapPost("/api/admin/logout", LogoutAsync);
         app.MapGet("/api/admin/me", Me);
@@ -228,9 +237,9 @@ public static class ApiEndpoints
         string? platform,
         string? model,
         string? keyword,
-        IRequestLogStore logs,
+        RequestLogStore logs,
         CancellationToken cancellationToken)
-        => Results.Ok(await logs.QueryAsync(
+        => Results.Ok(await logs.QueryAdminAsync(
             new RequestLogQuery(
                 page ?? 1,
                 pageSize ?? 20,
@@ -245,12 +254,14 @@ public static class ApiEndpoints
         string? fromUtc,
         string? toUtc,
         string? timezone,
-        IAnalyticsService analytics,
+        string? platform,
+        string? model,
+        AnalyticsService analytics,
         IRealtimeMetrics metrics,
         CancellationToken cancellationToken)
     {
         var (from, to) = ResolveRange(fromUtc, toUtc, timezone);
-        var report = await analytics.QueryAsync(new AnalyticsQuery(from, to, Bucket: "hour"), cancellationToken);
+        var report = await analytics.QueryUsageAsync(new AnalyticsQuery(from, to, platform, model, Bucket: "hour"), cancellationToken);
         return Results.Ok(new { range = report, live = metrics.Snapshot(), timezone = timezone ?? "Asia/Shanghai" });
     }
 
@@ -260,11 +271,11 @@ public static class ApiEndpoints
         string? platform,
         string? model,
         string? bucket,
-        IAnalyticsService analytics,
+        AnalyticsService analytics,
         CancellationToken cancellationToken)
     {
         var (from, to) = ResolveRange(fromUtc, toUtc, null);
-        return Results.Ok(await analytics.QueryAsync(
+        return Results.Ok(await analytics.QueryUsageAsync(
             new AnalyticsQuery(from, to, platform, model, bucket ?? "hour"),
             cancellationToken));
     }
@@ -847,11 +858,17 @@ public static class ApiEndpoints
 
     private static async Task<IResult> ModelsAsync(
         IModelCatalog catalog,
+        ModelMappingStore mappings,
+        IPlatformRegistry platforms,
         CancellationToken cancellationToken)
         => Results.Ok(new
         {
             @object = "list",
-            data = await catalog.ListAsync(cancellationToken)
+            data = (await catalog.ListAsync(cancellationToken)).Concat(mappings.List()
+                .Where(mapping => mapping.Enabled && mapping.Targets.Any(target => target.Enabled
+                    && platforms.Get(target.Platform) is { Enabled: true } registration
+                    && registration.PluginKey.Equals(target.PluginKey, StringComparison.OrdinalIgnoreCase)))
+                .Select(mapping => new ModelDescriptor(mapping.Name, mapping.Name)))
         });
 
     private static IResult EmbeddingsAsync()

@@ -25,8 +25,10 @@ internal sealed class PluginProxyBinding(
 internal sealed class PluginHttpClient(
     Func<CancellationToken, Task<PluginProxyBinding?>> proxyFactory,
     HttpClient directClient,
-    Action<HttpResponseMessage>? onResponse = null) : IPluginHttpClient, IAsyncDisposable
+    Action<HttpResponseMessage>? onResponse = null,
+    int maxAttempts = 1) : IPluginHttpClient, IAsyncDisposable
 {
+    public int MaxAttempts { get; } = maxAttempts;
     private readonly SemaphoreSlim _proxyGate = new(1, 1);
     private PluginProxyBinding? _proxyBinding;
     private int _proxyInitialized;

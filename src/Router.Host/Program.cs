@@ -41,6 +41,10 @@ builder.Services.AddOptions<AuthOptions>()
     .Bind(builder.Configuration.GetSection("Auth"));
 builder.Services.AddOptions<LogRetentionOptions>()
     .Bind(builder.Configuration.GetSection("Logging"));
+builder.Services.AddOptions<AppearanceOptions>()
+    .Bind(builder.Configuration.GetSection("Appearance"))
+    .Validate(options => AppearanceOptions.IsSupported(options.Theme), "Appearance theme must be default or minimal.")
+    .ValidateOnStart();
 builder.Services.AddSingleton<PasswordHasher>();
 builder.Services.AddSingleton<AdminAuthService>();
 builder.Services.AddSingleton<ApiKeyService>();

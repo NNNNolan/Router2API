@@ -33,6 +33,10 @@ public sealed class ResourceEventLogSink(SqlSugarDatabase database) : ILogSink<R
 public sealed class RequestLogStore(SqlSugarDatabase database) : ILogSink<RequestLog>, IRequestLogStore
 {
     public Task WriteAsync(RequestLog item, CancellationToken cancellationToken = default)
+        => WriteAsync(item, null, cancellationToken);
+
+    /// <summary>将宿主统计元数据与原请求日志一次写入，插件日志契约保持不变。</summary>
+    public Task WriteAsync(RequestLog item, UsageMetadata? usageMetadata, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(item);
         cancellationToken.ThrowIfCancellationRequested();
@@ -49,12 +53,33 @@ public sealed class RequestLogStore(SqlSugarDatabase database) : ILogSink<Reques
             DurationMs = item.DurationMs,
             TtfbMs = item.TtfbMs ?? 0,
             UsageJson = item.Usage is null ? null : JsonSerializer.Serialize(item.Usage),
+            UsageMetadataJson = usageMetadata is null ? null : JsonSerializer.Serialize(usageMetadata),
             AttemptDetailsJson = item.AttemptDetails.Count == 0
                 ? null
                 : JsonSerializer.Serialize(item.AttemptDetails),
             CreatedAtUtc = item.CreatedAt.UtcDateTime
         }).ExecuteCommand();
         return Task.CompletedTask;
+    }
+
+    /// <summary>管理端返回原日志字段及宿主用量来源；旧日志的元数据保持为空。</summary>
+    public async Task<PagedResult<object>> QueryAdminAsync(RequestLogQuery query, CancellationToken cancellationToken = default)
+    {
+        var page = await QueryAsync(query, cancellationToken);
+        var ids = page.Items.Select(item => item.Id).ToArray();
+        using var db = database.CreateClient();
+        var metadata = ids.Length == 0 ? new Dictionary<string, string?>() : db.Queryable<RequestLogEntity>()
+            .Where(item => ids.Contains(item.Id))
+            .Select(item => new { item.Id, item.UsageMetadataJson })
+            .ToList()
+            .ToDictionary(item => item.Id, item => item.UsageMetadataJson);
+        var items = page.Items.Select(log => (object)new
+        {
+            log.Id, log.TraceId, log.Platform, log.Model, log.Success, log.Cancelled, log.StatusCode,
+            log.DurationMs, log.TtfbMs, log.Usage, log.AttemptDetails, log.CreatedAt,
+            usageMetadata = metadata.GetValueOrDefault(log.Id) is { } json ? JsonSerializer.Deserialize<UsageMetadata>(json) : null
+        }).ToArray();
+        return new(items, page.Page, page.PageSize, page.Total);
     }
 
     public Task<PagedResult<RequestLog>> QueryAsync(

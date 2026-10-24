@@ -1,4 +1,6 @@
 export interface Principal { userName: string; role: string }
+export type AppearanceTheme = 'default' | 'minimal'
+export interface AppearanceSettings { theme: AppearanceTheme }
 
 export interface Metrics {
   totalRequests: number
@@ -13,6 +15,9 @@ export interface Metrics {
 
 export interface PlatformMetric { platform: string; requests: number; errors: number; averageLatencyMs: number }
 export interface Platform { name: string; pluginKey: string; displayName: string; probeEndpoint: string | null; enabled: boolean }
+// retryCount 沿用服务端字段名，表示含首次请求的总尝试次数；null 继承插件。
+export interface ModelMappingTarget { pluginKey: string; platform: string; model: string; enabled: boolean; retryCount: number | null }
+export interface ModelMapping { id: string; name: string; enabled: boolean; targets: ModelMappingTarget[] }
 
 export interface PageResult<T> { items: T[]; page: number; pageSize: number; total: number; totalPages: number }
 export type PageParams = { page?: number; pageSize?: 20 | 50 | 100 }
@@ -108,10 +113,12 @@ export interface ModelPlazaModel {
 }
 export interface ModelPlazaResponse { updatedAt: string; source: string; models: ModelPlazaModel[] }
 export interface RequestAttemptDetail { proxyId: string | null; proxyAddress: string; statusCode: number | null; outcome: string; isTransportFailure: boolean; reason: string | null; durationMs: number }
-export interface RequestLog { cancelled?: boolean; id: string; traceId: string; platform: string | null; model: string | null; success: boolean; statusCode: number; durationMs: number; ttfbMs: number | null; usage: { promptTokens: number; completionTokens: number; totalTokens: number } | null; attemptDetails?: RequestAttemptDetail[]; createdAt: string }
+export interface UsageMetadata { source: 'plugin' | 'response' | 'estimated' | 'mixed' | 'unknown'; inputSource: string; outputSource: string; totalSource?: string | null; isPartial: boolean; algorithm: string | null; warning?: string | null }
+export interface RequestLog { cancelled?: boolean; id: string; traceId: string; platform: string | null; model: string | null; success: boolean; statusCode: number; durationMs: number; ttfbMs: number | null; usage: { promptTokens: number; completionTokens: number; totalTokens: number } | null; usageMetadata?: UsageMetadata | null; attemptDetails?: RequestAttemptDetail[]; createdAt: string }
 export interface TaskLog { id: string; pluginKey: string; platform: string | null; taskName: string; accountId: string | null; status: string; message: string | null; error: string | null; detailsJson: string | null; durationMs: number; startedAt: string; finishedAt: string | null }
 export interface PluginLog { id: string; pluginKey: string; platform: string | null; level: string; eventType: string; message: string; traceId: string | null; taskName: string | null; accountId: string | null; model: string | null; statusCode: number | null; durationMs: number | null; detailsJson: string | null; createdAt: string }
 export interface ConfigSnapshot {
+  appearance: AppearanceSettings
   configPath: string
   fileExists: boolean
   source: string
@@ -120,8 +127,9 @@ export interface ConfigSnapshot {
   redis: { connectionString: string; instanceName: string }
   logging: { dataRetentionDays: number; cleanupCron: string; minimumPluginLogLevel: string }
 }
-export interface AnalyticsBucket { startUtc: string; requests: number; successes: number; failures: number; tokens: number; averageLatencyMs: number; p95LatencyMs: number }
-export interface AnalyticsReport { fromUtc: string; toUtc: string; requests: number; successes: number; failures: number; tokens: number; averageLatencyMs: number; p95LatencyMs: number; buckets: AnalyticsBucket[]; byPlatform: Record<string, number> }
+export interface UsageBreakdown { name: string; requests: number; inputTokens: number; outputTokens: number; tokens: number; estimatedRequests: number }
+export interface AnalyticsBucket { startUtc: string; requests: number; successes: number; failures: number; tokens: number; averageLatencyMs: number; p95LatencyMs: number; inputTokens?: number; outputTokens?: number }
+export interface AnalyticsReport { fromUtc: string; toUtc: string; requests: number; successes: number; failures: number; tokens: number; averageLatencyMs: number; p95LatencyMs: number; buckets: AnalyticsBucket[]; byPlatform: Record<string, number>; inputTokens?: number; outputTokens?: number; estimatedRequests?: number; partialRequests?: number; unknownUsageRequests?: number; platforms?: UsageBreakdown[]; models?: UsageBreakdown[] }
 
 export class ApiError extends Error {
   constructor(public readonly status: number, message: string) { super(message); this.name = 'ApiError' }
@@ -217,12 +225,13 @@ export async function request<T>(path: string, init: ApiRequestInit = {}): Promi
 function page<T>(value: unknown, map: (value: unknown) => T): PageResult<T> { const raw = asObject(value); const items = asArray(raw.items ?? value).map(map); return { items, page: asNumber(raw.page) ?? 1, pageSize: asNumber(raw.pageSize) ?? 20, total: asNumber(raw.total) ?? items.length, totalPages: asNumber(raw.totalPages) ?? 1 } }
 
 export const api = {
+  appearance: () => request<AppearanceSettings>('/api/appearance'),
   login: async (username: string, password: string) => normalizePrincipal(await request<unknown>('/api/admin/login', { method: 'POST', body: { username, password } })),
   logout: () => request<void>('/api/admin/logout', { method: 'POST' }),
   me: async () => normalizePrincipal(await request<unknown>('/api/admin/me')),
   hostVersion: () => request<{ version: string }>('/api/admin/version'),
   metrics: async () => normalizeMetrics(await request<unknown>('/api/admin/metrics')),
-  analyticsOverview: (params: { fromUtc?: Date; toUtc?: Date; timezone?: string } = {}) => request<{ range: AnalyticsReport; live: unknown }>(`/api/admin/analytics/overview${queryString(params)}`),
+  analyticsOverview: (params: { fromUtc?: Date; toUtc?: Date; timezone?: string; platform?: string; model?: string } = {}) => request<{ range: AnalyticsReport; live: { activeConnections: number } }>(`/api/admin/analytics/overview${queryString(params)}`),
   analytics: (params: { fromUtc?: Date; toUtc?: Date; platform?: string; model?: string; bucket?: string } = {}) => request<AnalyticsReport>(`/api/admin/analytics${queryString(params)}`),
   logs: async (params: PageParams & { fromUtc?: Date; toUtc?: Date; platform?: string; model?: string; keyword?: string } = {}) => page(await request<unknown>(`/api/admin/logs${queryString(params)}`), value => asObject(value) as unknown as RequestLog),
   taskLogs: async (params: PageParams & { fromUtc?: Date; toUtc?: Date; pluginKey?: string; platform?: string; taskName?: string; status?: string; keyword?: string } = {}) => page(await request<unknown>(`/api/admin/task-logs${queryString(params)}`), value => asObject(value) as unknown as TaskLog),
@@ -259,6 +268,9 @@ export const api = {
   pluginInstallations: () => request<PluginInstallation[]>('/api/admin/plugin-installations'),
   pluginUpdates: () => request<PluginAvailableUpdate[]>('/api/admin/plugin-updates'),
   models: () => request<{ data: ModelDescriptor[] }>('/v1/models'),
+  modelMappings: () => request<ModelMapping[]>('/api/admin/model-mappings'),
+  saveModelMapping: (mapping: ModelMapping) => request<ModelMapping>(mapping.id ? `/api/admin/model-mappings/${encodeURIComponent(mapping.id)}` : '/api/admin/model-mappings', { method: mapping.id ? 'PUT' : 'POST', body: mapping }),
+  deleteModelMapping: (id: string) => request<void>(`/api/admin/model-mappings/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   modelPlaza: async () => normalizeModelPlaza(await request<unknown>('/api/admin/model-plaza')),
   refreshModelPlaza: async () => normalizeModelPlaza(await request<unknown>('/api/admin/model-plaza/refresh', { method: 'POST' })),
   refreshModelMetadata: () => request<{ updatedAt: string; modelCount: number; protocolCount: number; protocolsUpdatedAt: string | null }>('/api/admin/model-metadata/refresh', { method: 'POST' }),

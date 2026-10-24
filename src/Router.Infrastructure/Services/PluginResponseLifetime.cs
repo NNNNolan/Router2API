@@ -22,6 +22,7 @@ public sealed class PluginResponseLifetime : IAsyncDisposable
     private bool _cancelled;
     private string? _error;
     private Usage? _usage;
+    private RequestUsageTracker? _usageTracker;
 
     private PluginResponseLifetime(AdapterResponse response)
     {
@@ -76,6 +77,18 @@ public sealed class PluginResponseLifetime : IAsyncDisposable
         {
             ObjectDisposedException.ThrowIf(_disposal is not null, this);
             _completed.Add(callback);
+        }
+    }
+
+    /// <summary>在流开始前接入宿主统计，仍由当前所有者单次读取和释放。</summary>
+    public void TrackUsage(RequestUsageTracker tracker)
+    {
+        ArgumentNullException.ThrowIfNull(tracker);
+        lock (_gate)
+        {
+            ObjectDisposedException.ThrowIf(_disposal is not null, this);
+            if (_started || _usageTracker is not null) throw new InvalidOperationException("Usage tracking is already attached or the stream has started.");
+            _usageTracker = tracker;
         }
     }
 
@@ -151,6 +164,7 @@ public sealed class PluginResponseLifetime : IAsyncDisposable
                 }
                 if (!next) { _ended = true; yield break; }
                 var chunk = reader.Current;
+                _usageTracker?.Observe(chunk);
                 _usage = chunk.Usage ?? _usage;
                 if (chunk.Error is { } error) Fail(false, error);
                 yield return chunk;
@@ -183,7 +197,9 @@ public sealed class PluginResponseLifetime : IAsyncDisposable
                     throw; // Never inject JSON/SSE into an opaque raw protocol.
                 }
                 if (!next) { _ended = true; yield break; }
-                yield return reader.Current;
+                var chunk = reader.Current;
+                _usageTracker?.ObserveRaw(chunk.Span);
+                yield return chunk;
             }
         }
         finally

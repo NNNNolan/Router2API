@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Router.Contracts.Host;
+using Router.Infrastructure.Services;
 using static Router.Host.Plugins.JavaScript.JsPluginCodec;
 
 namespace Router.Host.Plugins.JavaScript;
@@ -97,7 +98,10 @@ internal sealed class JsHttpCapabilities(JsPluginManifest manifest, IPluginServi
             throw new InvalidOperationException("Invalid HTTP options.");
         if (spec.Retry is { MaxRetries: > 0 } && (route != "pool" || spec.Client is not null))
             throw new InvalidOperationException("Transport retries require the independent pool send operation, not a fixed client.");
-        if (spec.Retry is { MaxRetries: > 0 } && invocation.Context.Attempt is not null && manifest.Policy.MaxAttempts > 1)
+        var attemptLimit = invocation.Context.Attempt is { } attempt
+            ? PluginAttemptExecutor.GetAttemptLimit(attempt.HttpClient) ?? manifest.Policy.MaxAttempts
+            : 1;
+        if (spec.Retry is { MaxRetries: > 0 } && invocation.Context.Attempt is not null && attemptLimit > 1)
             throw new InvalidOperationException("Choose one retry owner: transport replay cannot be combined with multiple model attempts.");
         if (route == "attempt" && invocation.Context.Attempt is null)
             throw new UnauthorizedAccessException("The attempt route requires a terminal attempt context.");

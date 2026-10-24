@@ -13,7 +13,7 @@ let reduced = false
 const removeListener = vi.fn()
 const metrics: Metrics = { totalRequests: 100, successfulRequests: 90, failedRequests: 10, requestsToday: 20, requestsPerMinute: 3, activeRequests: 2, averageLatencyMs: 125, platforms: [] }
 const report: AnalyticsReport = {
-  fromUtc: '2026-10-18T00:00:00Z', toUtc: '2026-10-18T02:00:00Z', requests: 20, successes: 19, failures: 1, tokens: 0, averageLatencyMs: 125, p95LatencyMs: 200, byPlatform: {},
+  fromUtc: '2026-10-18T00:00:00Z', toUtc: '2026-10-18T02:00:00Z', requests: 20, successes: 19, failures: 1, tokens: 0, inputTokens: 0, outputTokens: 0, estimatedRequests: 2, partialRequests: 1, unknownUsageRequests: 3, averageLatencyMs: 125, p95LatencyMs: 200, byPlatform: {},
   buckets: [
     { startUtc: '2026-10-18T00:00:00Z', requests: 6, successes: 5, failures: 1, tokens: 0, averageLatencyMs: 125, p95LatencyMs: 200 },
     { startUtc: '2026-10-18T01:00:00Z', requests: 14, successes: 14, failures: 0, tokens: 0, averageLatencyMs: 125, p95LatencyMs: 200 },
@@ -68,6 +68,8 @@ describe('总览数据与动效', () => {
     expect(option.series[0].data).toEqual([6, 14])
     expect(option.series[1].data).toEqual([1, 0])
     expect(page.findAll('.metric-value').map(item => item.text())).toEqual(['20次', '90.0%', '125ms', '2个'])
+    expect(page.findAll('.usage-token-value').map(item => item.text())).toEqual(['0', '0', '0'])
+    expect(page.text()).toContain('2 次含估算 · 1 次不完整 · 3 次来源未知')
   })
 
   it('指标和趋势失败时显示错误，不展示伪造的零值或曲线', async () => {

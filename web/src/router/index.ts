@@ -14,6 +14,7 @@ import PluginLogsPage from '@/pages/PluginLogsPage.vue'
 import PluginPage from '@/pages/PluginPage.vue'
 import ConfigPage from '@/pages/ConfigPage.vue'
 import ModelPlazaPage from '@/pages/ModelPlazaPage.vue'
+import ModelMappingsPage from '@/pages/ModelMappingsPage.vue'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -27,6 +28,7 @@ const router = createRouter({
         { path: '', name: 'dashboard', component: DashboardPage },
         { path: 'analytics', name: 'analytics', component: AnalyticsPage },
         { path: 'models', name: 'models', component: ModelPlazaPage },
+        { path: 'model-mappings', name: 'model-mappings', component: ModelMappingsPage },
         { path: 'accounts', name: 'accounts', component: AccountsPage },
         { path: 'proxies', name: 'proxies', component: ProxiesPage },
         { path: 'plugins', name: 'plugins', component: PluginsPage },

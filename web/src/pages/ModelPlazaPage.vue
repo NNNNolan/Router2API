@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
-import { NAlert, NButton, NCard, NEmpty, NIcon, NInput, NPagination, NSelect, NSpin, NTag, useMessage } from 'naive-ui'
+import { NAlert, NButton, NEmpty, NIcon, NInput, NPagination, NSelect, NSpin, useMessage } from 'naive-ui'
 import { RefreshOutline } from '@vicons/ionicons5'
 import { api, type ModelPlazaModel } from '@/services/api'
 import ResponsiveFilterPanel from '@/components/ResponsiveFilterPanel.vue'
+import ModelAvatar from '@/components/ModelAvatar.vue'
 
 const message = useMessage()
 const queryClient = useQueryClient()
@@ -18,7 +19,7 @@ const query = useQuery({
 const keyword = ref('')
 const platform = ref<string | null>(null)
 const page = ref(1)
-const pageSize = ref(24)
+const pageSize = ref(20)
 const refreshing = ref(false)
 
 const platformOptions = computed(() => {
@@ -42,11 +43,6 @@ const filteredModels = computed(() => {
 
 const pageCount = computed(() => Math.max(1, Math.ceil(filteredModels.value.length / pageSize.value)))
 const pageModels = computed(() => filteredModels.value.slice((page.value - 1) * pageSize.value, page.value * pageSize.value))
-const pageSizeOptions = [
-  { label: '24 / 页', value: 24 },
-  { label: '48 / 页', value: 48 },
-  { label: '96 / 页', value: 96 },
-]
 
 watch([keyword, platform, pageSize], () => { page.value = 1 })
 watch(pageCount, count => { if (page.value > count) page.value = count })
@@ -71,10 +67,13 @@ function formatLimit(value: number) {
   return value.toLocaleString('zh-CN')
 }
 
-function reasoningLabel(model: ModelPlazaModel) {
-  if (!model.supportsReasoning) return '不支持'
-  const levels = model.reasoningLevels.length > 0 ? model.reasoningLevels.join(' / ') : '支持'
-  return model.reasoningTokenLimit ? `${levels} · ≤${formatLimit(model.reasoningTokenLimit)}` : levels
+function reasoningLevels(model: ModelPlazaModel) {
+  const order = ['low', 'medium', 'high', 'xhigh', 'max']
+  return [...new Set(model.reasoningLevels)].sort((first, second) => {
+    const firstIndex = order.indexOf(first.toLowerCase())
+    const secondIndex = order.indexOf(second.toLowerCase())
+    return (firstIndex < 0 ? order.length : firstIndex) - (secondIndex < 0 ? order.length : secondIndex)
+  })
 }
 
 function updatedAt(value: string) {
@@ -85,12 +84,11 @@ function updatedAt(value: string) {
 
 <template>
   <div class="model-plaza-page">
-    <NCard :bordered="false" class="model-plaza-toolbar">
+    <section class="model-plaza-toolbar" aria-label="模型目录筛选">
       <div class="model-plaza-toolbar-head">
         <div>
-          <div class="page-eyebrow">MODEL CATALOG</div>
           <h2>模型广场</h2>
-          <p>仅展示已启用插件提供的模型；上下文、输入输出上限和推理能力优先从 models.dev 补全，目录每 4 小时自动缓存。</p>
+          <p>浏览已启用的模型，比较上下文与推理能力。</p>
         </div>
         <NButton circle :loading="refreshing" secondary type="primary" aria-label="刷新模型目录" title="刷新模型目录" @click="refreshModels">
           <template #icon><NIcon :component="RefreshOutline" /></template>
@@ -100,14 +98,13 @@ function updatedAt(value: string) {
       <div class="model-plaza-filter-row">
         <NInput v-model:value="keyword" clearable placeholder="搜索模型名称或 ID" aria-label="搜索模型名称或 ID" />
         <NSelect v-model:value="platform" clearable filterable :options="platformOptions" placeholder="全部平台" aria-label="按平台筛选" />
-        <NSelect v-model:value="pageSize" :options="pageSizeOptions" aria-label="每页模型数量" />
       </div>
       </ResponsiveFilterPanel>
       <div class="model-plaza-meta">
         <span>共 {{ filteredModels.length.toLocaleString('zh-CN') }} 个模型</span>
         <span>{{ updatedAt(query.data.value?.updatedAt ?? '') }}</span>
       </div>
-    </NCard>
+    </section>
 
     <div v-if="query.isPending.value" class="center-spin"><NSpin size="large" /></div>
     <div v-else-if="query.isError.value" class="model-plaza-error">
@@ -119,26 +116,30 @@ function updatedAt(value: string) {
     <template v-else>
       <NEmpty v-if="filteredModels.length === 0" :description="query.data.value?.models.length ? '没有匹配的模型' : '当前没有已启用插件模型'" class="model-plaza-empty" />
       <div v-else class="model-plaza-grid">
-        <NCard v-for="model in pageModels" :key="model.id" :bordered="false" class="model-plaza-card">
-          <div class="model-card-top">
-            <NTag type="info" size="small" round>{{ model.platformName || model.platform }}</NTag>
+        <article v-for="model in pageModels" :key="model.id" class="model-plaza-card">
+          <div class="model-card-header">
+            <ModelAvatar :model-id="model.id" :display-name="model.displayName" :platform="model.platform" />
+            <span class="model-badge platform-badge" :title="model.platform">{{ model.platformName || model.platform }}</span>
           </div>
           <h3 :title="model.displayName">{{ model.displayName }}</h3>
           <p class="model-card-id" :title="model.id">{{ model.id }}</p>
-          <div class="model-spec-grid">
-            <div><span>上下文</span><strong>{{ formatLimit(model.contextWindow) }}</strong></div>
-            <div><span>输入</span><strong>{{ formatLimit(model.inputLimit) }}</strong></div>
-            <div><span>输出</span><strong>{{ formatLimit(model.outputLimit) }}</strong></div>
+          <div v-if="model.contextWindow || model.inputLimit || model.outputLimit" class="model-card-badges">
+            <span v-if="model.contextWindow" class="model-badge"><strong>{{ formatLimit(model.contextWindow) }}</strong> 上下文</span>
+            <span v-if="model.inputLimit" class="model-badge" :title="`最大输入 ${model.inputLimit.toLocaleString()} Token`">输入 {{ formatLimit(model.inputLimit) }}</span>
+            <span v-if="model.outputLimit" class="model-badge" :title="`最大输出 ${model.outputLimit.toLocaleString()} Token`">输出 {{ formatLimit(model.outputLimit) }}</span>
           </div>
-          <div class="model-reasoning-row">
-            <span>推理能力</span>
-            <NTag :type="model.supportsReasoning ? 'success' : 'default'" size="small">{{ reasoningLabel(model) }}</NTag>
+          <div class="model-reasoning-section" aria-label="推理等级与预算">
+            <div v-if="model.supportsReasoning && model.reasoningLevels.length" class="model-reasoning-levels">
+              <span v-for="level in reasoningLevels(model)" :key="level" class="reasoning-level">{{ level }}</span>
+            </div>
+            <span v-else :class="model.supportsReasoning ? 'reasoning-level' : 'reasoning-unavailable'">{{ model.supportsReasoning ? '支持 · 未声明等级' : '推理未声明' }}</span>
+            <span v-if="model.reasoningTokenLimit" class="model-reasoning-limit" :title="`推理预算上限 ${model.reasoningTokenLimit.toLocaleString()} Token`">≤ {{ formatLimit(model.reasoningTokenLimit) }}</span>
           </div>
-        </NCard>
+        </article>
       </div>
       <div v-if="filteredModels.length > 0" class="model-plaza-footer">
         <span>显示 {{ (page - 1) * pageSize + 1 }}–{{ Math.min(page * pageSize, filteredModels.length) }} / {{ filteredModels.length }}</span>
-        <NPagination v-model:page="page" :page-count="pageCount" :page-size="pageSize" :page-slot="5" />
+        <NPagination v-model:page="page" v-model:page-size="pageSize" :page-count="pageCount" :page-sizes="[20, 40, 80]" :page-slot="5" show-size-picker class="model-plaza-pagination" />
       </div>
     </template>
   </div>

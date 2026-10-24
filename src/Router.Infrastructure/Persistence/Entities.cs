@@ -2,6 +2,22 @@ using SqlSugar;
 
 namespace Router.Infrastructure.Persistence;
 
+/// <summary>宿主对外模型映射；NameKey 保证别名不区分大小写且唯一。</summary>
+[SugarTable("model_mappings")]
+[SugarIndex("ux_model_mapping_name", nameof(NameKey), OrderByType.Asc, IsUnique = true)]
+public sealed class ModelMappingEntity
+{
+    [SugarColumn(IsPrimaryKey = true, Length = 32)]
+    public string Id { get; set; } = "";
+    [SugarColumn(Length = 128)]
+    public string Name { get; set; } = "";
+    [SugarColumn(Length = 128)]
+    public string NameKey { get; set; } = "";
+    public bool Enabled { get; set; }
+    [SugarColumn(ColumnDataType = "text")]
+    public string TargetsJson { get; set; } = "[]";
+}
+
 [SugarTable("plugin_http_origins")]
 public sealed class PluginHttpOriginEntity
 {
@@ -167,6 +183,9 @@ public sealed class RequestLogEntity
 
     [SugarColumn(ColumnDataType = "text", IsNullable = true)]
     public string? UsageJson { get; set; }
+
+    [SugarColumn(ColumnDataType = "text", IsNullable = true)]
+    public string? UsageMetadataJson { get; set; }
 
     [SugarColumn(ColumnDataType = "text", IsNullable = true)]
     public string? AttemptDetailsJson { get; set; }
