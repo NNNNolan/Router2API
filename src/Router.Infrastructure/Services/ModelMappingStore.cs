@@ -7,7 +7,15 @@ namespace Router.Infrastructure.Services;
 public sealed record ModelMapping(string Id, string Name, bool Enabled, IReadOnlyList<ModelMappingTarget> Targets);
 
 /// <summary>映射目标；RetryCount 沿用原字段名，表示包含首次请求的总尝试次数，空值继承插件策略。</summary>
-public sealed record ModelMappingTarget(string PluginKey, string Platform, string Model, bool Enabled = true, int? RetryCount = null);
+/// <param name="PluginKey">目标插件。</param>
+/// <param name="Platform">目标平台。</param>
+/// <param name="Model">插件内模型。</param>
+/// <param name="Enabled">是否启用目标。</param>
+/// <param name="RetryCount">包含首次请求的总尝试次数；空值继承插件。</param>
+/// <param name="FailureThreshold">连续失败多少轮后冷却；零表示不冷却。</param>
+/// <param name="CooldownSeconds">冷却秒数；零表示不冷却。</param>
+public sealed record ModelMappingTarget(string PluginKey, string Platform, string Model, bool Enabled = true,
+    int? RetryCount = null, int FailureThreshold = 3, int CooldownSeconds = 300);
 
 /// <summary>将整条映射原子保存为一行，数组顺序即调用顺序；每次请求读取独立快照。</summary>
 public sealed class ModelMappingStore(SqlSugarDatabase database, ModelMappingHealth health)
@@ -46,6 +54,8 @@ public sealed class ModelMappingStore(SqlSugarDatabase database, ModelMappingHea
             if (target is null || !ValidIdentifier(target.PluginKey, 128) || !ValidIdentifier(target.Platform, 128)
                 || !ValidIdentifier(target.Model, 256) || target.RetryCount is < 0 or > 35)
                 throw new ArgumentException("目标须填写插件、平台和模型；尝试次数须为 1–35（包含首次请求）或留空继承。");
+            if (target.FailureThreshold < 0 || target.CooldownSeconds < 0)
+                throw new ArgumentException("连续失败轮数和冷却秒数须为非负整数，任一为 0 表示不冷却。");
             return NormalizeLegacyCount(target with { PluginKey = target.PluginKey.Trim(), Platform = target.Platform.Trim(), Model = target.Model.Trim() });
         }).ToArray();
         if (targets.Select(target => (target.PluginKey.ToUpperInvariant(), target.Platform.ToUpperInvariant(), target.Model.ToUpperInvariant())).Distinct().Count() != targets.Length)

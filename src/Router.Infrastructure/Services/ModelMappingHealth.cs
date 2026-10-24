@@ -1,6 +1,6 @@
 namespace Router.Infrastructure.Services;
 
-/// <summary>宿主进程内的映射目标健康状态；连续三轮请求失败后暂停五分钟。</summary>
+/// <summary>宿主进程内的映射目标健康状态，按各目标配置的失败轮数和时长冷却。</summary>
 /// <param name="timeProvider">用于冷却截止时间的时钟。</param>
 public sealed class ModelMappingHealth(TimeProvider? timeProvider = null)
 {
@@ -19,7 +19,14 @@ public sealed class ModelMappingHealth(TimeProvider? timeProvider = null)
         lock (_gate)
         {
             cooldownUntil = null;
-            if (_states.TryGetValue(key, out var state) && state.CooldownUntil is { } until)
+            _states.TryGetValue(key, out var state);
+            // 规则保存后，在途请求仍可按旧快照执行，但不得改变新规则的健康状态。
+            if (state is not null && !state.Matches(target)) return new Invocation(static _ => null);
+            if (target.FailureThreshold == 0 || target.CooldownSeconds == 0)
+            {
+                return new Invocation(static _ => null);
+            }
+            if (state?.CooldownUntil is { } until)
             {
                 if (until > _clock.GetUtcNow())
                 {
@@ -29,20 +36,26 @@ public sealed class ModelMappingHealth(TimeProvider? timeProvider = null)
                 // 新的一轮不接受上一冷却周期中仍未结束的请求结果。
                 state = null;
             }
-            if (state is null) _states[key] = state = new State();
+            if (state is null) _states[key] = state = new State(target.FailureThreshold, target.CooldownSeconds);
             var admittedState = state;
             return new Invocation(success => Complete(key, admittedState, success));
         }
     }
 
-    /// <summary>映射编辑后仅保留仍存在的目标状态，不因改名或调整顺序重置冷却。</summary>
+    /// <summary>映射编辑后保留仍存在且规则不变的目标状态；规则变更会清空原状态。</summary>
     /// <param name="mapping">已持久化的映射。</param>
     public void RetainTargets(ModelMapping mapping)
     {
-        var retained = mapping.Targets.Select(target => TargetKey.Create(mapping.Id, target)).ToHashSet();
+        var retained = mapping.Targets.ToDictionary(target => TargetKey.Create(mapping.Id, target));
         lock (_gate)
-            foreach (var key in _states.Keys.Where(key => key.MappingId == mapping.Id && !retained.Contains(key)).ToArray())
-                _states.Remove(key);
+        {
+            foreach (var pair in _states.Where(pair => pair.Key.MappingId == mapping.Id).ToArray())
+                if (!retained.ContainsKey(pair.Key))
+                    _states.Remove(pair.Key);
+            foreach (var pair in retained)
+                if (!_states.TryGetValue(pair.Key, out var state) || !state.Matches(pair.Value))
+                    _states[pair.Key] = new State(pair.Value.FailureThreshold, pair.Value.CooldownSeconds);
+        }
     }
 
     /// <summary>删除映射的运行态，并使其尚未完成的请求结果失效。</summary>
@@ -65,16 +78,20 @@ public sealed class ModelMappingHealth(TimeProvider? timeProvider = null)
                 current.Failures = 0;
                 return null;
             }
-            if (++current.Failures < 3) return null;
-            current.CooldownUntil = _clock.GetUtcNow().AddMinutes(5);
+            if (++current.Failures < current.FailureThreshold) return null;
+            current.CooldownUntil = _clock.GetUtcNow().AddSeconds(current.CooldownSeconds);
             return current.CooldownUntil;
         }
     }
 
-    private sealed class State
+    private sealed class State(int failureThreshold, int cooldownSeconds)
     {
+        public int FailureThreshold { get; } = failureThreshold;
+        public int CooldownSeconds { get; } = cooldownSeconds;
         public int Failures { get; set; }
         public DateTimeOffset? CooldownUntil { get; set; }
+        public bool Matches(ModelMappingTarget target)
+            => FailureThreshold == target.FailureThreshold && CooldownSeconds == target.CooldownSeconds;
     }
 
     private readonly record struct TargetKey(string MappingId, string PluginKey, string Platform, string Model)

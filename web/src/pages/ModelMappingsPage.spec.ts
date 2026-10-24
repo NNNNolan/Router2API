@@ -13,8 +13,8 @@ let client: QueryClient | undefined
 const mapping: ModelMapping = {
   id: 'mapping-id', name: 'ds4', enabled: true,
   targets: [
-    { pluginKey: 'plugin-a', platform: 'a', model: 'real-a', enabled: true, retryCount: 1 },
-    { pluginKey: 'plugin-b', platform: 'b', model: 'real-b', enabled: true, retryCount: null },
+    { pluginKey: 'plugin-a', platform: 'a', model: 'real-a', enabled: true, retryCount: 1, failureThreshold: 3, cooldownSeconds: 300 },
+    { pluginKey: 'plugin-b', platform: 'b', model: 'real-b', enabled: true, retryCount: null, failureThreshold: 3, cooldownSeconds: 300 },
   ],
 }
 
@@ -43,7 +43,87 @@ async function click(text: string) {
   await flushPromises()
 }
 
+function select(label: string) {
+  return view!.findAllComponents(NSelect).find(input => input.props('inputProps')?.['aria-label'] === label)!
+}
+function number(label: string) {
+  return view!.findAllComponents(NInputNumber).find(input => input.props('inputProps')?.['aria-label'] === label)!
+}
+
 describe('模型映射管理', () => {
+  it('新建目标默认 3 轮、5 分钟，并允许为新目标单独设置', async () => {
+    await render()
+    await click('新建映射')
+    expect(number('目标 1 连续失败轮数').props('value')).toBe(3)
+    expect(number('目标 1 冷却时间').props('value')).toBe(5)
+    expect(select('目标 1 冷却单位').props('value')).toBe(60)
+    number('目标 1 连续失败轮数').vm.$emit('update:value', 8)
+    await click('添加目标')
+    expect(number('目标 2 连续失败轮数').props('value')).toBe(3)
+    expect(number('目标 2 冷却时间').props('value')).toBe(5)
+  })
+
+  it.each([[3600, 2, 7200], [60, 5, 300], [1, 45, 45]])('按单位 %s 将输入 %s 换算为 %s 秒保存', async (unit, value, seconds) => {
+    const write = vi.spyOn(api, 'saveModelMapping').mockResolvedValue(mapping)
+    const page = await render([mapping])
+    await click('编辑')
+    number('目标 1 连续失败轮数').vm.$emit('update:value', 7)
+    number('目标 1 冷却时间').vm.$emit('update:value', value)
+    select('目标 1 冷却单位').vm.$emit('update:value', unit)
+    page.getComponent(NForm).vm.$emit('submit', new Event('submit'))
+    await vi.waitFor(() => expect(write).toHaveBeenCalled())
+    expect(write.mock.calls[0]![0].targets).toEqual([
+      { ...mapping.targets[0], failureThreshold: 7, cooldownSeconds: seconds }, mapping.targets[1],
+    ])
+  })
+
+  it.each([[0, 300], [3, 0], [0, 0]])('轮数 %s、冷却秒数 %s 时明确关闭冷却，保存时保留零', async (failureThreshold, cooldownSeconds) => {
+    const configured = { ...mapping, targets: [{ ...mapping.targets[0]!, failureThreshold, cooldownSeconds }] }
+    const write = vi.spyOn(api, 'saveModelMapping').mockResolvedValue(configured)
+    const page = await render([configured])
+    expect(page.text()).toContain('不自动冷却')
+    await click('编辑')
+    expect(page.text()).toContain('此目标不自动冷却。')
+    page.getComponent(NForm).vm.$emit('submit', new Event('submit'))
+    await vi.waitFor(() => expect(write).toHaveBeenCalledWith(configured))
+  })
+
+  it('编辑回显小时和秒，调整调用顺序后保留各自的冷却规则', async () => {
+    const configured = { ...mapping, targets: [
+      { ...mapping.targets[0]!, failureThreshold: 2, cooldownSeconds: 7200 },
+      { ...mapping.targets[1]!, failureThreshold: 7, cooldownSeconds: 45 },
+    ] }
+    const write = vi.spyOn(api, 'saveModelMapping').mockResolvedValue(configured)
+    const page = await render([configured])
+    expect(page.text()).toContain('连续 2 轮失败，冷却 2 小时')
+    expect(page.text()).toContain('连续 7 轮失败，冷却 45 秒')
+    await click('编辑')
+    expect(number('目标 1 冷却时间').props('value')).toBe(2)
+    expect(select('目标 1 冷却单位').props('value')).toBe(3600)
+    expect(number('目标 2 冷却时间').props('value')).toBe(45)
+    expect(select('目标 2 冷却单位').props('value')).toBe(1)
+    page.findAllComponents(NButton).find(button => button.attributes('aria-label') === '上移目标 2')!.vm.$emit('click')
+    await flushPromises()
+    page.getComponent(NForm).vm.$emit('submit', new Event('submit'))
+    await vi.waitFor(() => expect(write).toHaveBeenCalledWith({ ...configured, targets: [...configured.targets].reverse() }))
+  })
+
+  it('轮数或时间清空时保留编辑并显示校验错误', async () => {
+    const write = vi.spyOn(api, 'saveModelMapping').mockResolvedValue(mapping)
+    const page = await render([mapping])
+    await click('编辑')
+    number('目标 1 连续失败轮数').vm.$emit('update:value', null)
+    page.getComponent(NForm).vm.$emit('submit', new Event('submit'))
+    await flushPromises()
+    expect(page.text()).toContain('请填写有效的非负整数轮数和冷却时间')
+    number('目标 1 连续失败轮数').vm.$emit('update:value', 0)
+    number('目标 1 冷却时间').vm.$emit('update:value', null)
+    page.getComponent(NForm).vm.$emit('submit', new Event('submit'))
+    await flushPromises()
+    expect(write).not.toHaveBeenCalled()
+    expect(page.find('.mapping-editor').exists()).toBe(true)
+  })
+
   it.each([
     ['cn/deepseek-v4-flash', 'deepseek-v4-flash'],
     ['vendor/cn/deepseek-v4-flash', 'deepseek-v4-flash'],
@@ -54,15 +134,15 @@ describe('模型映射管理', () => {
     await click('新建映射')
     const name = page.findAllComponents(NInput).find(input => input.attributes('aria-label') === '对外模型名')!
     name.vm.$emit('update:value', '  ')
-    page.findAllComponents(NSelect)[0]!.vm.$emit('update:value', 'a')
+    select('目标 1 平台').vm.$emit('update:value', 'a')
     await flushPromises()
-    page.findAllComponents(NSelect)[1]!.vm.$emit('update:value', model)
+    select('目标 1 模型').vm.$emit('update:value', model)
     await flushPromises()
     expect(name.props('value')).toBe(expectedName)
     await click('添加目标')
-    page.findAllComponents(NSelect)[2]!.vm.$emit('update:value', 'b')
+    select('目标 2 平台').vm.$emit('update:value', 'b')
     await flushPromises()
-    page.findAllComponents(NSelect)[3]!.vm.$emit('update:value', 'other-model')
+    select('目标 2 模型').vm.$emit('update:value', 'other-model')
     await flushPromises()
     expect(name.props('value')).toBe(expectedName)
     page.getComponent(NForm).vm.$emit('submit', new Event('submit'))
@@ -78,23 +158,23 @@ describe('模型映射管理', () => {
     const page = await render()
     await click('新建映射')
     page.findAllComponents(NInput).find(input => input.attributes('aria-label') === '对外模型名')!.vm.$emit('update:value', ' ds4 ')
-    page.findAllComponents(NSelect)[0]!.vm.$emit('update:value', 'a')
+    select('目标 1 平台').vm.$emit('update:value', 'a')
     await flushPromises()
-    page.findAllComponents(NSelect)[1]!.vm.$emit('update:value', 'custom-a')
+    select('目标 1 模型').vm.$emit('update:value', 'custom-a')
     expect(page.getComponent(NInputNumber).props()).toMatchObject({ min: 1, max: 35 })
     page.getComponent(NInputNumber).vm.$emit('update:value', 3)
     await click('添加目标')
     expect(page.text()).toContain('此目标最多调用 3 次，包含首次请求。')
-    page.findAllComponents(NSelect)[2]!.vm.$emit('update:value', 'b')
+    select('目标 2 平台').vm.$emit('update:value', 'b')
     await flushPromises()
-    page.findAllComponents(NSelect)[3]!.vm.$emit('update:value', 'custom-b')
+    select('目标 2 模型').vm.$emit('update:value', 'custom-b')
     page.findAllComponents(NButton).find(button => button.attributes('aria-label') === '上移目标 2')!.vm.$emit('click')
     await flushPromises()
     page.getComponent(NForm).vm.$emit('submit', new Event('submit'))
     await vi.waitFor(() => expect(save).toHaveBeenCalled())
     expect(save).toHaveBeenCalledWith({ id: '', name: 'ds4', enabled: true, targets: [
-      { pluginKey: 'plugin-b', platform: 'b', model: 'custom-b', enabled: true, retryCount: null },
-      { pluginKey: 'plugin-a', platform: 'a', model: 'custom-a', enabled: true, retryCount: 3 },
+      { pluginKey: 'plugin-b', platform: 'b', model: 'custom-b', enabled: true, retryCount: null, failureThreshold: 3, cooldownSeconds: 300 },
+      { pluginKey: 'plugin-a', platform: 'a', model: 'custom-a', enabled: true, retryCount: 3, failureThreshold: 3, cooldownSeconds: 300 },
     ] })
     await vi.waitFor(() => expect(message.success).toHaveBeenCalledWith('模型映射已保存'))
     expect(page.find('.mapping-editor').exists()).toBe(false)

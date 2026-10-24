@@ -83,6 +83,34 @@ public sealed class ModelMappingTests : IDisposable
     }
 
     [TestMethod]
+    public void StoreReadsLegacyCooldownDefaultsAndPersistsIndependentPolicies()
+    {
+        var saved = Save([Target("a", 1)]);
+        const string legacyTargets = """[{"PluginKey":"a","Platform":"a","Model":"real-a","Enabled":true,"RetryCount":1}]""";
+        using var db = _database.CreateClient();
+        db.Updateable<ModelMappingEntity>().SetColumns(row => row.TargetsJson == legacyTargets)
+            .Where(row => row.Id == saved.Id).ExecuteCommand();
+        var legacy = _store.Find(saved.Name)!;
+        legacy.Targets[0].FailureThreshold.Should().Be(3);
+        legacy.Targets[0].CooldownSeconds.Should().Be(300);
+        var updated = _store.Save(legacy with { Targets = [
+            legacy.Targets[0] with { FailureThreshold = 7, CooldownSeconds = 3600 },
+            Target("b", 1) with { FailureThreshold = 0, CooldownSeconds = 0 }
+        ] });
+        new ModelMappingStore(_database, _health).Find(saved.Name).Should().BeEquivalentTo(updated, options => options.WithStrictOrdering());
+    }
+
+    [TestMethod]
+    [DataRow(-1, 300)]
+    [DataRow(3, -1)]
+    public void StoreRejectsNegativeCooldownRules(int threshold, int seconds)
+    {
+        Action save = () => Save([Target("a", 1) with { FailureThreshold = threshold, CooldownSeconds = seconds }]);
+        save.Should().Throw<ArgumentException>();
+        _store.List().Should().BeEmpty();
+    }
+
+    [TestMethod]
     public void StoreRejectsInvalidNamesBudgetsDuplicateAndEmptyTargets()
     {
         var mapping = new ModelMapping("", "ds4", true, [Target("a", 0)]);
@@ -539,6 +567,86 @@ public sealed class ModelMappingTests : IDisposable
         var deleted = Begin(mapping);
         _store.Delete(mapping.Id).Should().BeTrue();
         deleted.Complete(false).Should().BeNull();
+    }
+
+    [TestMethod]
+    [DataRow(1, 1)]
+    [DataRow(2, 60)]
+    [DataRow(5, 3600)]
+    public async Task TargetsUseTheirConfiguredFailureThresholdAndCooldownDuration(int threshold, int seconds)
+    {
+        var calls = 0;
+        Register("a", _ => { calls++; return Task.FromResult(Failure()); });
+        Register("b", _ => Task.FromResult(Success()));
+        Save([Target("a", 1) with { FailureThreshold = threshold, CooldownSeconds = seconds }, Target("b", 1)]);
+        for (var index = 0; index < threshold; index++) await Pipeline().ExecuteAsync(Context());
+        var cooling = Context();
+        await Pipeline().ExecuteAsync(cooling);
+        calls.Should().Be(threshold);
+        cooling.SelectedPlatform.Should().Be("b");
+        cooling.AttemptDetails[0].Outcome.Should().Be("Skipped");
+        _now += TimeSpan.FromSeconds(seconds - 1);
+        await Pipeline().ExecuteAsync(Context());
+        calls.Should().Be(threshold);
+        _now += TimeSpan.FromSeconds(1);
+        await Pipeline().ExecuteAsync(Context());
+        calls.Should().Be(threshold + 1);
+    }
+
+    [TestMethod]
+    [DataRow(0, 300)]
+    [DataRow(3, 0)]
+    [DataRow(0, 0)]
+    public async Task ZeroInEitherCooldownSettingDisablesAutomaticCooldown(int threshold, int seconds)
+    {
+        var calls = 0;
+        Register("a", _ => { calls++; return Task.FromResult(Failure()); });
+        Save([Target("a", 1) with { FailureThreshold = threshold, CooldownSeconds = seconds }]);
+        for (var index = 0; index < 8; index++)
+        {
+            var request = Context();
+            await Pipeline().ExecuteAsync(request);
+            request.AttemptDetails.Should().NotContain(detail => detail.Outcome == "Skipped");
+        }
+        calls.Should().Be(8);
+    }
+
+    [TestMethod]
+    public void ChangingCooldownRulesDiscardsOldCountersAndInflightResults()
+    {
+        var mapping = Save([Target("a", 1)]);
+        var oldResult = Begin(mapping);
+        for (var index = 0; index < 3; index++) Begin(mapping).Complete(false);
+        var updated = _store.Save(mapping with { Targets = [mapping.Targets[0] with { FailureThreshold = 1, CooldownSeconds = 2 }] });
+        oldResult.Complete(false).Should().BeNull();
+        Begin(updated).Complete(false).Should().Be(_now.AddSeconds(2));
+        Begin(mapping).Complete(false).Should().BeNull("an old request snapshot must not replace the new policy state");
+        _health.TryBegin(updated.Id, updated.Targets[0], out var until).Should().BeNull();
+        until.Should().Be(_now.AddSeconds(2));
+        var disabled = _store.Save(updated with { Targets = [updated.Targets[0] with { CooldownSeconds = 0 }] });
+        for (var index = 0; index < 8; index++) Begin(disabled).Complete(false).Should().BeNull();
+        var enabled = _store.Save(disabled with { Targets = [mapping.Targets[0]] });
+        Begin(enabled).Complete(false).Should().BeNull();
+        Begin(enabled).Complete(false).Should().BeNull();
+        Begin(enabled).Complete(false).Should().Be(_now.AddMinutes(5));
+    }
+
+    [TestMethod]
+    public async Task EachTargetInOneMappingKeepsItsOwnCooldownPolicy()
+    {
+        var firstCalls = 0;
+        var secondCalls = 0;
+        Register("a", _ => { firstCalls++; return Task.FromResult(Failure()); });
+        Register("b", _ => { secondCalls++; return Task.FromResult(Failure()); });
+        Save([Target("a", 1) with { FailureThreshold = 1, CooldownSeconds = 10 },
+            Target("b", 1) with { FailureThreshold = 2, CooldownSeconds = 3600 }]);
+        for (var index = 0; index < 3; index++) await Pipeline().ExecuteAsync(Context());
+        firstCalls.Should().Be(1);
+        secondCalls.Should().Be(2);
+        _now += TimeSpan.FromSeconds(10);
+        await Pipeline().ExecuteAsync(Context());
+        firstCalls.Should().Be(2);
+        secondCalls.Should().Be(2);
     }
 
     private ModelMappingHealth.Invocation Begin(ModelMapping mapping, ModelMappingTarget? target = null)

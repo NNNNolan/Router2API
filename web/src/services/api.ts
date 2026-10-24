@@ -16,7 +16,7 @@ export interface Metrics {
 export interface PlatformMetric { platform: string; requests: number; errors: number; averageLatencyMs: number }
 export interface Platform { name: string; pluginKey: string; displayName: string; probeEndpoint: string | null; enabled: boolean }
 // retryCount 沿用服务端字段名，表示含首次请求的总尝试次数；null 继承插件。
-export interface ModelMappingTarget { pluginKey: string; platform: string; model: string; enabled: boolean; retryCount: number | null }
+export interface ModelMappingTarget { pluginKey: string; platform: string; model: string; enabled: boolean; retryCount: number | null; failureThreshold: number; cooldownSeconds: number }
 export interface ModelMapping { id: string; name: string; enabled: boolean; targets: ModelMappingTarget[] }
 
 export interface PageResult<T> { items: T[]; page: number; pageSize: number; total: number; totalPages: number }

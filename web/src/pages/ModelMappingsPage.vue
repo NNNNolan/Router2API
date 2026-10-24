@@ -8,7 +8,14 @@ const message = useMessage()
 const queryClient = useQueryClient()
 const query = useQuery({ queryKey: ['model-mappings'], queryFn: api.modelMappings })
 const platforms = useQuery({ queryKey: ['platforms'], queryFn: api.platforms })
-const editing = ref<ModelMapping | null>(null)
+type CooldownUnit = 1 | 60 | 3600
+type EditableTarget = Omit<ModelMappingTarget, 'failureThreshold' | 'cooldownSeconds'> & {
+  failureThreshold: number | null; cooldownValue: number | null; cooldownUnit: CooldownUnit
+}
+type EditableMapping = Omit<ModelMapping, 'targets'> & { targets: EditableTarget[] }
+const maxInteger = 2_147_483_647
+const cooldownUnits = [{ label: '小时', value: 3600 }, { label: '分钟', value: 60 }, { label: '秒', value: 1 }]
+const editing = ref<EditableMapping | null>(null)
 const models = useQuery({ queryKey: ['model-plaza'], queryFn: api.modelPlaza, enabled: computed(() => editing.value !== null), staleTime: 60_000 })
 const keyword = ref('')
 const saving = ref(false)
@@ -17,38 +24,49 @@ const formError = ref('')
 const mappings = computed(() => (query.data.value ?? []).filter(mapping => mapping.name.toLowerCase().includes(keyword.value.trim().toLowerCase())))
 const locked = computed(() => saving.value || busyId.value !== null)
 
-function blankTarget(): ModelMappingTarget { return { pluginKey: '', platform: '', model: '', enabled: true, retryCount: null } }
+function durationUnit(seconds: number): CooldownUnit { return seconds > 0 && seconds % 3600 === 0 ? 3600 : seconds % 60 === 0 ? 60 : 1 }
+function editableTarget(target: ModelMappingTarget): EditableTarget {
+  const { cooldownSeconds, ...values } = target
+  const cooldownUnit = durationUnit(cooldownSeconds)
+  return { ...values, cooldownValue: cooldownSeconds / cooldownUnit, cooldownUnit }
+}
+function blankTarget(): EditableTarget { return editableTarget({ pluginKey: '', platform: '', model: '', enabled: true, retryCount: null, failureThreshold: 3, cooldownSeconds: 300 }) }
+function cooldownSummary(target: ModelMappingTarget) {
+  if (target.failureThreshold === 0 || target.cooldownSeconds === 0) return '不自动冷却'
+  const unit = durationUnit(target.cooldownSeconds)
+  return `连续 ${target.failureThreshold} 轮失败，冷却 ${target.cooldownSeconds / unit} ${cooldownUnits.find(option => option.value === unit)!.label}`
+}
 function edit(mapping?: ModelMapping) {
   formError.value = ''
-  editing.value = mapping ? { ...mapping, targets: mapping.targets.map(target => ({ ...target })) }
+  editing.value = mapping ? { ...mapping, targets: mapping.targets.map(editableTarget) }
     : { id: '', name: '', enabled: true, targets: [blankTarget()] }
 }
 function closeEditor() {
   if (!locked.value) editing.value = null
 }
-function platformOptions(target: ModelMappingTarget) {
+function platformOptions(target: EditableTarget) {
   const options = (platforms.data.value ?? []).map(platform => ({ value: platform.name, label: `${platform.displayName || platform.name} · ${platform.pluginKey}${platform.enabled ? '' : '（已停用）'}` }))
   if (target.platform && !options.some(option => option.value === target.platform)) options.push({ value: target.platform, label: `${target.platform} · ${target.pluginKey}（未加载）` })
   return options
 }
-function selectPlatform(target: ModelMappingTarget, name: string | null) {
+function selectPlatform(target: EditableTarget, name: string | null) {
   const platform = platforms.data.value?.find(platform => platform.name === name)
   target.platform = name ?? ''
   target.pluginKey = platform?.pluginKey ?? ''
   target.model = ''
 }
-function selectModel(target: ModelMappingTarget, model: string | null) {
+function selectModel(target: EditableTarget, model: string | null) {
   target.model = model ?? ''
   if (editing.value && !editing.value.name.trim())
     editing.value.name = target.model.slice(target.model.lastIndexOf('/') + 1).trim()
 }
-function modelOptions(target: ModelMappingTarget) {
+function modelOptions(target: EditableTarget) {
   const prefix = `${target.platform}/`
   const options = (models.data.value?.models ?? []).filter(model => model.id.startsWith(prefix)).map(model => ({ value: model.id.slice(prefix.length), label: model.id.slice(prefix.length) }))
   if (target.model && !options.some(option => option.value === target.model)) options.push({ value: target.model, label: target.model })
   return options
 }
-function unavailable(target: ModelMappingTarget) {
+function unavailable(target: Pick<ModelMappingTarget, 'platform' | 'pluginKey'>) {
   if (!platforms.data.value) return false
   return !platforms.data.value.some(platform => platform.enabled && platform.name.toLowerCase() === target.platform.toLowerCase() && platform.pluginKey.toLowerCase() === target.pluginKey.toLowerCase())
 }
@@ -67,9 +85,17 @@ async function save() {
   if (!/^[a-zA-Z0-9._:-]{1,128}$/.test(mapping.name.trim())) { formError.value = '对外模型名须为 1–128 个英文字母、数字或 . _ - :，不能包含 /。'; return }
   if (!mapping.targets.length || mapping.targets.some(target => !target.pluginKey || !target.platform || !target.model.trim())) { formError.value = '请为每个目标选择平台并填写插件内模型。'; return }
   if (mapping.enabled && !mapping.targets.some(target => target.enabled)) { formError.value = '启用的映射至少需要一个启用的目标。'; return }
+  if (mapping.targets.some(target => target.failureThreshold === null || !Number.isInteger(target.failureThreshold)
+    || target.failureThreshold < 0 || target.failureThreshold > maxInteger || target.cooldownValue === null
+    || !Number.isInteger(target.cooldownValue) || target.cooldownValue < 0 || target.cooldownValue > Math.floor(maxInteger / target.cooldownUnit))) {
+    formError.value = '请填写有效的非负整数轮数和冷却时间；任一项为 0 表示不冷却。'
+    return
+  }
   saving.value = true
   try {
-    await api.saveModelMapping({ ...mapping, name: mapping.name.trim(), targets: mapping.targets.map(target => ({ ...target, model: target.model.trim() })) })
+    await api.saveModelMapping({ ...mapping, name: mapping.name.trim(), targets: mapping.targets.map(({ cooldownValue, cooldownUnit, ...target }) => ({
+      ...target, model: target.model.trim(), failureThreshold: target.failureThreshold!, cooldownSeconds: cooldownValue! * cooldownUnit,
+    })) })
     editing.value = null
     await refreshMappings()
     message.success('模型映射已保存')
@@ -100,7 +126,7 @@ async function remove(mapping: ModelMapping) {
 <template>
   <section class="model-mappings-page">
     <div class="page-heading">
-      <div><h2>模型映射</h2><p>按目标顺序调用插件，成功后返回；目标连续 3 轮请求失败后冷却 5 分钟。</p></div>
+      <div><h2>模型映射</h2><p>按目标顺序调用插件，成功后返回；可为每个目标单独设置失败轮数与冷却时间。</p></div>
       <NButton type="primary" :disabled="locked || editing !== null" @click="edit()">新建映射</NButton>
     </div>
 
@@ -130,6 +156,16 @@ async function remove(mapping: ModelMapping) {
                   <NFormItem label="插件内模型" :label-props="{ for: `mapping-model-${index}` }" required><NSelect :value="target.model" :options="modelOptions(target)" filterable tag :loading="models.isFetching.value" :input-props="{ id: `mapping-model-${index}`, 'aria-label': `目标 ${index + 1} 模型` }" placeholder="选择或输入模型 ID" @update:value="selectModel(target, $event)" /></NFormItem>
                   <NFormItem label="尝试次数（含首次）" :label-props="{ for: `mapping-attempts-${index}` }"><NInputNumber v-model:value="target.retryCount" :min="1" :max="35" :precision="0" :show-button="false" clearable placeholder="继承插件" :input-props="{ id: `mapping-attempts-${index}`, 'aria-label': `目标 ${index + 1} 尝试次数` }" /></NFormItem>
                 </div>
+                <div class="mapping-cooldown-fields">
+                  <NFormItem label="连续失败轮数" :label-props="{ for: `mapping-failures-${index}` }"><NInputNumber v-model:value="target.failureThreshold" :min="0" :max="maxInteger" :precision="0" :show-button="false" placeholder="3" :input-props="{ id: `mapping-failures-${index}`, 'aria-label': `目标 ${index + 1} 连续失败轮数` }" /></NFormItem>
+                  <NFormItem label="冷却时间" :label-props="{ for: `mapping-cooldown-${index}` }">
+                    <div class="mapping-duration-input">
+                      <NInputNumber v-model:value="target.cooldownValue" :min="0" :max="Math.floor(maxInteger / target.cooldownUnit)" :precision="0" :show-button="false" placeholder="5" :input-props="{ id: `mapping-cooldown-${index}`, 'aria-label': `目标 ${index + 1} 冷却时间` }" />
+                      <NSelect v-model:value="target.cooldownUnit" :options="cooldownUnits" :input-props="{ 'aria-label': `目标 ${index + 1} 冷却单位` }" />
+                    </div>
+                  </NFormItem>
+                </div>
+                <p class="mapping-help">{{ target.failureThreshold === 0 || target.cooldownValue === 0 ? '此目标不自动冷却。' : '连续失败达到设定轮数后暂停调用；轮数或时间为 0 时不冷却。' }}</p>
                 <p v-if="target.retryCount !== null" class="mapping-help">此目标最多调用 {{ target.retryCount }} 次，包含首次请求。</p>
                 <p v-if="target.platform && unavailable(target)" class="mapping-unavailable">此插件平台当前不可用，请求时会跳过。</p>
               </li>
@@ -162,7 +198,7 @@ async function remove(mapping: ModelMapping) {
         <ol class="mapping-route-list">
           <li v-for="(target, index) in mapping.targets" :key="index" :class="{ 'mapping-target-inactive': !target.enabled }">
             <span class="mapping-order">{{ index + 1 }}</span><div class="mapping-route-model"><code>{{ target.model }}</code><span>{{ target.pluginKey }} / {{ target.platform }}</span></div>
-            <span class="mapping-retry">{{ target.retryCount === null ? '继承插件策略' : `最多尝试 ${target.retryCount} 次` }}</span>
+            <div class="mapping-policy"><span class="mapping-retry">{{ target.retryCount === null ? '继承插件策略' : `最多尝试 ${target.retryCount} 次` }}</span><span class="mapping-cooldown">{{ cooldownSummary(target) }}</span></div>
             <NTag v-if="!target.enabled" size="small">已停用</NTag><NTag v-else-if="unavailable(target)" type="warning" size="small">平台不可用</NTag>
           </li>
         </ol>
@@ -199,16 +235,24 @@ async function remove(mapping: ModelMapping) {
 .mapping-target-toolbar strong { font-size: 13px; }
 .mapping-target-fields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 130px; gap: 12px; margin: 10px 0; }
 .mapping-target-fields :deep(.n-form-item-blank), .mapping-target-fields :deep(.n-input-number) { min-width: 0; width: 100%; }
+.mapping-cooldown-fields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; margin-bottom: 8px; }
+.mapping-cooldown-fields :deep(.n-input-number) { width: 100%; }
+.mapping-duration-input { display: flex; gap: 6px; width: 100%; min-width: 0; }
+.mapping-duration-input .n-input-number { flex: 1; min-width: 0; }
+.mapping-duration-input .n-select { flex: none; width: 90px; }
+.mapping-policy { display: grid; gap: 4px; max-width: 100%; text-align: right; }
 .mapping-route-list li { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; padding: 10px 0; border-top: 1px solid var(--border); }
 .mapping-order { display: grid; place-items: center; flex: none; width: 24px; height: 24px; border-radius: 50%; background: var(--primary-soft); color: var(--primary); font-size: 12px; font-variant-numeric: tabular-nums; font-weight: 600; }
 .mapping-route-model { display: grid; gap: 3px; flex: 1; min-width: 120px; overflow-wrap: anywhere; }
-.mapping-route-model span, .mapping-retry { color: var(--muted); font-size: 12px; }
+.mapping-route-model span, .mapping-retry, .mapping-cooldown { color: var(--muted); font-size: 12px; }
 .mapping-target-inactive { color: var(--muted); }
 .mapping-unavailable { color: var(--warning); font-size: 12px; margin: 0; }
 .mapping-feedback { margin-top: 16px; }
 .mapping-editor-actions { justify-content: flex-end; }
 @media (max-width: 760px) {
   .mapping-target-fields { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .mapping-cooldown-fields { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .mapping-policy { text-align: left; }
   .mapping-card { padding: 16px; }
   .mapping-card-heading { align-items: flex-start; }
   .mapping-actions { gap: 8px; }

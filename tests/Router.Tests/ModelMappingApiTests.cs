@@ -112,8 +112,11 @@ public sealed class ModelMappingApiTests
         var created = await client.PostAsJsonAsync("/api/admin/model-mappings", mapping);
         created.EnsureSuccessStatusCode();
         var saved = (await created.Content.ReadFromJsonAsync<ModelMapping>())!;
+        saved.Targets[0].FailureThreshold.Should().Be(3);
+        saved.Targets[0].CooldownSeconds.Should().Be(300);
         (await client.PostAsJsonAsync("/api/admin/model-mappings", mapping)).StatusCode.Should().Be(HttpStatusCode.Conflict);
         (await client.PostAsJsonAsync("/api/admin/model-mappings", mapping with { Name = "a/model" })).StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await client.PostAsJsonAsync("/api/admin/model-mappings", mapping with { Name = "invalid-cooldown", Targets = [mapping.Targets[0] with { CooldownSeconds = -1 }] })).StatusCode.Should().Be(HttpStatusCode.BadRequest);
         (await client.GetFromJsonAsync<ModelMapping[]>("/api/admin/model-mappings"))!.Should().ContainSingle();
         var models = await client.GetFromJsonAsync<JsonElement>("/v1/models");
         models.GetProperty("data").EnumerateArray().Select(model => model.GetProperty("id").GetString()).Should().Contain("ds4");
