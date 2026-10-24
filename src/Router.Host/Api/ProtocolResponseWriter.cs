@@ -145,6 +145,11 @@ internal static class ProtocolResponseWriter
         await foreach (var chunk in response.Stream.WithCancellation(cancellationToken))
         {
             if (chunk == default) { await WriteHeartbeatAsync(context, cancellationToken); continue; }
+            if (chunk.Error is { } error)
+            {
+                await writer.WriteAsync(ProtocolApiErrors.OpenAi(error, StatusCodes.Status502BadGateway, chunk.ErrorType), cancellationToken);
+                break;
+            }
             if (string.IsNullOrEmpty(chunk.Delta)
                 && chunk.FinishReason is null
                 && chunk.Usage is null)
@@ -463,6 +468,8 @@ internal static class ProtocolResponseWriter
             }
         }
 
+        var incompleteReason = ResponsesIncompleteReason(finishReason);
+        var outputStatus = incompleteReason is null ? "completed" : "incomplete";
         if (textOutputIndex is { } textIndex)
         {
             var contentPart = new { type = "output_text", text = text.ToString(), annotations = Array.Empty<object>() };
@@ -480,7 +487,7 @@ internal static class ProtocolResponseWriter
                 ["content_index"] = 0,
                 ["part"] = contentPart
             });
-            var textItem = new { id = textItemId, type = "message", status = "completed", role = "assistant", content = new[] { contentPart } };
+            var textItem = new { id = textItemId, type = "message", status = outputStatus, role = "assistant", content = new[] { contentPart } };
             await EmitAsync("response.output_item.done", new Dictionary<string, object?>
             {
                 ["output_index"] = textIndex,
@@ -515,7 +522,7 @@ internal static class ProtocolResponseWriter
                 {
                     id = tool.ItemId,
                     type = "custom_tool_call",
-                    status = "completed",
+                    status = outputStatus,
                     call_id = tool.CallId,
                     name = tool.Name,
                     input
@@ -533,7 +540,7 @@ internal static class ProtocolResponseWriter
                 {
                     id = tool.ItemId,
                     type = "function_call",
-                    status = "completed",
+                    status = outputStatus,
                     arguments,
                     call_id = tool.CallId,
                     name = tool.Name
@@ -547,13 +554,12 @@ internal static class ProtocolResponseWriter
             output[tool.OutputIndex] = item;
         }
 
-        var incomplete = finishReason is "length" or "max_tokens";
-        var finalEvent = incomplete ? "response.incomplete" : "response.completed";
+        var finalEvent = incompleteReason is null ? "response.completed" : "response.incomplete";
         var finalResponse = Response(
-            incomplete ? "incomplete" : "completed",
+            outputStatus,
             output.Values.ToArray(),
             usage,
-            incompleteDetails: incomplete ? new { reason = "max_output_tokens" } : null);
+            incompleteDetails: incompleteReason is null ? null : new { reason = incompleteReason });
         await EmitAsync(finalEvent, new Dictionary<string, object?> { ["response"] = finalResponse });
     }
 
@@ -711,7 +717,7 @@ internal static class ProtocolResponseWriter
                     {
                         type = "content_block_start",
                         index = tool.BlockIndex,
-                        content_block = new { type = "tool_use", id = tool.Id, name = tool.Name, input = new { } }
+                        content_block = new { type = "tool_use", id = tool.Id, name = tool.Name, input = new { }, caller = new { type = "direct" } }
                     }, cancellationToken);
                     if (tool.Arguments.Length > 0)
                         await WriteEventAsync(writer, "content_block_delta", new
@@ -810,16 +816,23 @@ internal static class ProtocolResponseWriter
     }
 
     private static string MapAnthropicStopReason(string? finishReason, bool hasToolCalls)
-        => hasToolCalls
-            ? "tool_use"
-            : finishReason switch
-            {
-                "length" or "max_tokens" => "max_tokens",
-                "stop_sequence" => "stop_sequence",
-                "pause_turn" => "pause_turn",
-                "refusal" => "refusal",
-                _ => "end_turn"
-            };
+        => finishReason switch
+        {
+            "length" or "max_tokens" => "max_tokens",
+            _ when hasToolCalls => "tool_use",
+            "stop_sequence" => "stop_sequence",
+            "pause_turn" => "pause_turn",
+            "refusal" => "refusal",
+            _ => "end_turn"
+        };
+
+    private static string? ResponsesIncompleteReason(string? finishReason)
+        => finishReason switch
+        {
+            "length" or "max_tokens" => "max_output_tokens",
+            "content_filter" => "content_filter",
+            _ => null
+        };
 
     private static ValueTask WriteEventAsync(
         SseJsonWriter writer,
@@ -849,6 +862,8 @@ internal static class ProtocolResponseWriter
     private static Dictionary<string, object?> CreateResponsesBody(CompletionSnapshot completion, AdapterRequest? request)
     {
         var output = new List<object>();
+        var incompleteReason = ResponsesIncompleteReason(completion.FinishReason);
+        var outputStatus = incompleteReason is null ? "completed" : "incomplete";
         var toolKinds = ReadResponsesToolKinds(request);
         if (!string.IsNullOrEmpty(completion.Reasoning))
             output.Add(new
@@ -863,7 +878,7 @@ internal static class ProtocolResponseWriter
             {
                 id = $"msg_{Guid.NewGuid():N}",
                 type = "message",
-                status = "completed",
+                status = outputStatus,
                 role = completion.Role,
                 content = new[] { new { type = "output_text", text = completion.Text, annotations = Array.Empty<object>() } }
             });
@@ -876,7 +891,7 @@ internal static class ProtocolResponseWriter
                 {
                     id = CustomToolItemId(callId),
                     type = "custom_tool_call",
-                    status = "completed",
+                    status = outputStatus,
                     call_id = callId,
                     name = call.Name ?? string.Empty,
                     input = ChatArgumentsToCustomInput(call.Name, call.Arguments ?? "{}")
@@ -888,7 +903,7 @@ internal static class ProtocolResponseWriter
                 {
                     id = $"fc_{Guid.NewGuid():N}",
                     type = "function_call",
-                    status = "completed",
+                    status = outputStatus,
                     call_id = callId,
                     name = call.Name ?? string.Empty,
                     arguments = call.Arguments ?? "{}"
@@ -900,12 +915,13 @@ internal static class ProtocolResponseWriter
         return CreateResponsesEnvelope(
             $"resp_{Guid.NewGuid():N}",
             completion.Model,
-            "completed",
+            outputStatus,
             output.ToArray(),
             createdAt,
             request,
             completion.Usage,
-            completedAt: createdAt);
+            completedAt: createdAt,
+            incompleteDetails: incompleteReason is null ? null : new { reason = incompleteReason });
     }
 
     private static Dictionary<string, object?> CreateResponsesEnvelope(
@@ -1119,13 +1135,23 @@ internal static class ProtocolResponseWriter
         if (!string.IsNullOrEmpty(completion.Text))
             content.Add(new { type = "text", text = completion.Text });
         foreach (var call in completion.ToolCalls)
+        {
+            var input = ParseToolInput(call.Arguments);
+            if (input is null)
+            {
+                // Messages 的非流式 input 必须是完整对象，不能把截断参数改写成可执行的 {}。
+                if (completion.FinishReason is "length" or "max_tokens") continue;
+                throw new JsonException("tool input must be a complete JSON object");
+            }
             content.Add(new
             {
                 type = "tool_use",
                 id = call.Id ?? $"call_{call.Index}",
                 name = call.Name ?? string.Empty,
-                input = ParseToolInput(call.Arguments)
+                input,
+                caller = new { type = "direct" }
             });
+        }
 
         return new
         {
@@ -1158,21 +1184,23 @@ internal static class ProtocolResponseWriter
     internal static string NormalizeOpenAiFinishReason(string? finishReason, bool hasToolCalls)
         => finishReason switch
         {
-            "length" or "content_filter" => finishReason,
+            "length" or "max_tokens" => "length",
+            "content_filter" => "content_filter",
             "tool_calls" or "function_call" when hasToolCalls => "tool_calls",
             "stop" or "end_turn" or "completed" => hasToolCalls ? "tool_calls" : "stop",
             _ => hasToolCalls ? "tool_calls" : "stop"
         };
 
-    private static JsonObject ParseToolInput(string? arguments)
+    private static JsonObject? ParseToolInput(string? arguments)
     {
+        if (string.IsNullOrWhiteSpace(arguments)) return null;
         try
         {
-            return JsonNode.Parse(arguments ?? "{}") as JsonObject ?? new JsonObject();
+            return JsonNode.Parse(arguments) as JsonObject;
         }
         catch (JsonException)
         {
-            return new JsonObject();
+            return null;
         }
     }
 

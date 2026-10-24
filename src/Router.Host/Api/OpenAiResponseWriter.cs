@@ -56,6 +56,7 @@ internal static class OpenAiResponseWriter
         using var writer = new SseJsonWriter(context.Response);
         var id = $"chatcmpl-{Guid.NewGuid():N}";
         var created = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+        var hasToolCalls = false;
         await foreach (var chunk in response.Stream.WithCancellation(cancellationToken))
         {
             if (chunk == default) { await ProtocolResponseWriter.WriteHeartbeatAsync(context, cancellationToken); continue; }
@@ -65,7 +66,8 @@ internal static class OpenAiResponseWriter
                 break;
             }
 
-            WriteChunk(writer.StartEvent(), chunk, id, created, model);
+            hasToolCalls |= chunk.ToolCalls is { Count: > 0 };
+            WriteChunk(writer.StartEvent(), chunk, id, created, model, hasToolCalls);
             await writer.FlushEventAsync(cancellationToken);
         }
 
@@ -73,7 +75,7 @@ internal static class OpenAiResponseWriter
         await context.Response.Body.FlushAsync(cancellationToken);
     }
 
-    internal static void WriteChunk(Utf8JsonWriter json, StreamChunk chunk, string id, long created, string model)
+    internal static void WriteChunk(Utf8JsonWriter json, StreamChunk chunk, string id, long created, string model, bool hasToolCalls = false)
     {
         var usageOnly = chunk.Usage is not null
             && chunk.Delta is null && chunk.FinishReason is null && chunk.Role is null
@@ -115,7 +117,7 @@ internal static class OpenAiResponseWriter
             json.WriteString("reasoning_signature", chunk.ReasoningSignature);
             json.WriteEndObject();
             json.WriteString("finish_reason", chunk.FinishReason is null ? null
-                : ProtocolResponseWriter.NormalizeOpenAiFinishReason(chunk.FinishReason, chunk.ToolCalls is { Count: > 0 }));
+                : ProtocolResponseWriter.NormalizeOpenAiFinishReason(chunk.FinishReason, hasToolCalls || chunk.ToolCalls is { Count: > 0 }));
             json.WriteEndObject();
         }
         json.WriteEndArray();
