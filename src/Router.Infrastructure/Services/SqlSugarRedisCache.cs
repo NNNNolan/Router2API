@@ -46,18 +46,22 @@ public sealed class SqlSugarRedisCache(
     }
 
     public T? Get<T>(string key)
+        => TryGet<T>(key, out var value) ? value : default;
+
+    private bool TryGet<T>(string key, out T? cached)
     {
+        cached = default;
         try
         {
             var value = redis.RequireClient().Get<string>(PhysicalKey(key));
-            if (string.IsNullOrWhiteSpace(value)) return default;
-            if (typeof(T) == typeof(string)) return (T)(object)value;
-            return JsonSerializer.Deserialize<T>(value);
+            if (string.IsNullOrWhiteSpace(value)) return false;
+            cached = typeof(T) == typeof(string) ? (T)(object)value : JsonSerializer.Deserialize<T>(value);
+            return cached is not null;
         }
         catch (Exception exception)
         {
             logger.LogDebug(exception, "sqlsugar redis cache read failed key={Key}", key);
-            return default;
+            return false;
         }
     }
 
@@ -96,7 +100,9 @@ public sealed class SqlSugarRedisCache(
 
     public T GetOrCreate<T>(string cacheKey, Func<T> create, int cacheDurationInSeconds)
     {
-        if (ContainsKey<T>(cacheKey)) return Get<T>(cacheKey)!;
+        // EXISTS 后缓存可能到期或被并发写入失效；只有实际读取成功才算命中。
+        // 单次 GET 也能区分缓存缺失与合法的值类型默认值（例如 0、false）。
+        if (TryGet<T>(cacheKey, out var cached)) return cached!;
 
         var created = create();
         if (created is not null) Add(cacheKey, created, cacheDurationInSeconds);
