@@ -216,6 +216,11 @@ internal static class CredentialCodec
             var root = document.RootElement;
             var values = ReadFields(root);
 
+            // 显式声明为 Custom 的凭据必须先于字段启发式生效：插件常在自定义字段里存 cookie、
+            // token 之类的键，若让启发式先行会把它们错误降级成 CookieCredential / BearerTokenCredential，
+            // 导致插件读不到自己的字段（例如豆包插件保存的 cookie 被吞掉后一直显示“缺少登录态”）。
+            if (NameEquals(kind, "custom")) return new CustomCredential(ReadCustomFields(root));
+
             if (NameEquals(kind, "apikey") || NameEquals(kind, "key") || IsPresent(values.ApiKey))
                 return new ApiKeyCredential(Text(values.ApiKey) ?? string.Empty);
 
@@ -241,11 +246,7 @@ internal static class CredentialCodec
 
             if (NameEquals(kind, "cookie") || IsPresent(values.Cookie))
                 return new CookieCredential(Text(values.Cookie) ?? string.Empty);
-            var fields = root.ValueKind == JsonValueKind.Object
-                ? root.EnumerateObject()
-                    .Where(property => property.Value.ValueKind is JsonValueKind.String or JsonValueKind.Number or JsonValueKind.True or JsonValueKind.False)
-                    .ToDictionary(property => property.Name, property => (string?)property.Value.ToString(), StringComparer.OrdinalIgnoreCase)
-                : new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+            var fields = ReadCustomFields(root);
             return fields.Count > 0
                 ? new CustomCredential(fields)
                 : new ApiKeyCredential(string.Empty);
@@ -255,6 +256,16 @@ internal static class CredentialCodec
             return new ApiKeyCredential(string.Empty);
         }
     }
+
+    /// <summary>把对象里的标量属性读成自定义凭据字段；嵌套对象与数组不进入字段表。</summary>
+    /// <param name="root">凭据 JSON 根元素。</param>
+    /// <returns>字段表；根不是对象时为空。</returns>
+    private static Dictionary<string, string?> ReadCustomFields(JsonElement root)
+        => root.ValueKind == JsonValueKind.Object
+            ? root.EnumerateObject()
+                .Where(property => property.Value.ValueKind is JsonValueKind.String or JsonValueKind.Number or JsonValueKind.True or JsonValueKind.False)
+                .ToDictionary(property => property.Name, property => (string?)property.Value.ToString(), StringComparer.OrdinalIgnoreCase)
+            : new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
 
     // 兼容旧字段名的拼写方式，比较时不创建规范化字符串。
     internal static bool NameEquals(ReadOnlySpan<char> value, ReadOnlySpan<char> expected)
