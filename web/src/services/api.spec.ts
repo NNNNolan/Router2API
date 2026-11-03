@@ -28,13 +28,27 @@ describe('测试窗口原始响应', () => {
     vi.stubGlobal('fetch', fetchMock)
     const payload = { model: 'test', stream: false }
     const result = await api.v1Request('/v1/chat/completions', payload, 'test-key')
-    expect(result).toEqual({ status, body })
+    expect(result).toMatchObject({ status, body, audio: null })
+    // 字符串正文由 Response 构造器补 text/plain；204 没有正文，也就没有 Content-Type。
+    expect(result.contentType.startsWith('text/plain')).toBe(status !== 204)
     const [path, init] = fetchMock.mock.calls[0]!
     expect(path).toBe('/v1/chat/completions')
     expect(init.credentials).toBe('include')
     expect(init.headers.get('Authorization')).toBe('Bearer test-key')
     expect(init.headers.get('Content-Type')).toBe('application/json')
     expect(init.body).toBe(JSON.stringify(payload))
+  })
+
+  it('音频响应换成 Blob URL，正文留空交给试听面板', async () => {
+    const audio = new Uint8Array([0x49, 0x44, 0x33, 0x04])
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(audio, { status: 200, headers: { 'content-type': 'audio/mpeg' } })))
+    const result = await api.v1Request('/v1/audio/speech', { model: 'doubaotts/taozi', input: 'hi' }, 'test-key')
+    expect(result.status).toBe(200)
+    expect(result.body).toBe('')
+    expect(result.contentType).toBe('audio/mpeg')
+    expect(result.audio?.size).toBe(audio.byteLength)
+    expect(result.audio?.url).toMatch(/^blob:/)
+    if (result.audio) URL.revokeObjectURL(result.audio.url)
   })
 
   it('保留网络异常，不伪造接口响应', async () => {

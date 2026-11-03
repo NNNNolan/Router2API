@@ -21,6 +21,8 @@ export interface ModelMappingTarget { pluginKey: string; platform: string; model
 export interface ModelMapping { id: string; name: string; enabled: boolean; targets: ModelMappingTarget[] }
 
 export interface PageResult<T> { items: T[]; page: number; pageSize: number; total: number; totalPages: number }
+/** 测试窗口一次直连 /v1 的结果：正文或音频二选一，音频只在 content-type 为 audio/* 时出现。 */
+export interface V1TestResult { status: number; body: string; contentType: string; audio: { url: string; size: number } | null }
 export type PageParams = { page?: number; pageSize?: 20 | 50 | 100 }
 
 export interface Account {
@@ -274,13 +276,19 @@ export const api = {
   rotateApiKey: () => request<{ key: string }>('/api/admin/api-key/rotate', { method: 'POST' }),
   config: () => request<ConfigSnapshot>('/api/admin/config'),
   saveConfig: (payload: Record<string, unknown>) => request<ConfigSnapshot>('/api/admin/config', { method: 'PUT', body: payload }),
-  v1Request: async (path: string, payload: Record<string, unknown>, key: string) => {
+  v1Request: async (path: string, payload: Record<string, unknown>, key: string): Promise<V1TestResult> => {
     const response = await sendRequest(path, {
       method: 'POST',
       headers: { Authorization: `Bearer ${key}` },
       body: payload,
     })
+    const contentType = response.headers.get('content-type') ?? ''
+    // 语音合成返回二进制音频：换成 Blob URL 供 <audio> 试听，正文留给错误响应。
+    if (contentType.toLowerCase().startsWith('audio/')) {
+      const blob = await response.blob()
+      return { status: response.status, body: '', contentType, audio: { url: URL.createObjectURL(blob), size: blob.size } }
+    }
     // 测试窗口保留成功及失败响应的原始正文，不解析 JSON 或提取 error。
-    return { status: response.status, body: await response.text() }
+    return { status: response.status, body: await response.text(), contentType, audio: null }
   },
 }

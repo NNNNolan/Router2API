@@ -9,10 +9,14 @@ vi.mock('naive-ui', async importOriginal => ({
 }))
 
 let wrapper: VueWrapper | undefined
+// jsdom 未实现 Object URL；音频面板卸载时会回收 Blob URL，这里补一个可断言的实现。
+const revokeObjectURL = vi.fn()
+Object.defineProperty(URL, 'revokeObjectURL', { value: revokeObjectURL, configurable: true, writable: true })
 afterEach(() => {
   wrapper?.unmount()
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
+  revokeObjectURL.mockClear()
 })
 
 describe('测试窗口', () => {
@@ -49,5 +53,41 @@ describe('测试窗口', () => {
     expect(wrapper.find('.response-markdown').exists()).toBe(false)
     expect(wrapper.find('script').exists()).toBe(false)
     expect(wrapper.text()).not.toContain('[object Object]')
+  })
+
+  it('音频响应显示播放器与下载链接，不再渲染正文', async () => {
+    vi.spyOn(api, 'models').mockResolvedValue({ data: [{ id: 'doubaotts/taozi', displayName: 'taozi' }] })
+    vi.spyOn(api, 'rawApiKey').mockResolvedValue({ key: 'test-key' })
+    vi.spyOn(api, 'v1Request').mockResolvedValue({
+      status: 200,
+      body: '',
+      contentType: 'audio/mpeg',
+      audio: { url: 'blob:speech', size: 2048 },
+    })
+    wrapper = shallowMount(TestPage, {
+      global: {
+        renderStubDefaultSlot: true,
+        stubs: {
+          Button: {
+            props: ['disabled'],
+            emits: ['click'],
+            template: '<button :disabled="disabled" @click="$emit(\'click\')"><slot /></button>',
+          },
+        },
+      },
+    })
+    await flushPromises()
+    await wrapper.get('button').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('audio').attributes('src')).toBe('blob:speech')
+    expect(wrapper.get('audio').attributes('controls')).toBeDefined()
+    expect(wrapper.get('.download-link').attributes()).toMatchObject({ href: 'blob:speech', download: 'speech.mp3' })
+    expect(wrapper.get('.audio-meta').text()).toContain('2.0 KB')
+    expect(wrapper.find('.response-text').exists()).toBe(false)
+
+    wrapper.unmount()
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:speech')
+    wrapper = undefined
   })
 })
