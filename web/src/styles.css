@@ -158,6 +158,7 @@ a { color: inherit; text-decoration: none; }
 .content-wrap { flex: 1; min-height: 0; background: var(--background); }
 .page-content { width: 100%; max-width: 1560px; margin: 0 auto; padding: 32px 28px; }
 .route-view { min-width: 0; }
+.page-content:has(> .route-view > .plugin-page-card) { padding-bottom: 0; }
 .page-content:has(> .route-view > .table-page) { display: flex; flex-direction: column; height: 100%; min-height: 0; }
 .page-content:has(> .route-view > .table-page) > .route-view { flex: 1; min-height: 0; }
 .page-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 18px; margin-bottom: 20px; }
@@ -221,7 +222,8 @@ a { color: inherit; text-decoration: none; }
 .table-page .table-footer { flex: none; }
 .table-pagination { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .table-pagination .n-pagination { min-width: 0; max-width: 100%; flex-wrap: wrap; row-gap: 8px; }
-.plugin-page-card { display: flex; flex-direction: column; height: calc(100dvh - var(--topbar-height) - 2 * var(--page-padding)); min-height: 520px; overflow: hidden; border: 1px solid var(--border); }
+.plugin-page-card { display: flex; flex-direction: column; height: calc(100dvh - var(--topbar-height) - 2 * var(--page-padding)); min-height: 0; overflow: hidden; }
+.plugin-page-card, .plugin-page-card * { box-sizing: content-box; }
 .plugin-page-card > .n-card-content { display: flex; flex: 1; min-height: 0; padding: 0; }
 .plugin-page-content { display: flex; flex: 1; min-height: 0; min-width: 0; padding: 20px; overflow: hidden; }
 .plugin-page-state { display: grid; flex: 1; min-height: 0; place-items: center; padding: 24px; }
@@ -402,7 +404,6 @@ a { color: inherit; text-decoration: none; }
   .topbar-actions { gap: 6px; }
   .user-chip span { display: none; }
   .page-content { padding: var(--page-padding); }
-  .plugin-page-card { min-height: 280px; }
   .plugin-page-content { padding: 14px; }
   .plugin-frame { min-width: 0; }
   .table-page, .table-card, .table-data-wrap, .page-content { min-width: 0; }

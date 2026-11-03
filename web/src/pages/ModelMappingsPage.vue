@@ -153,7 +153,7 @@ async function remove(mapping: ModelMapping) {
                 </div>
                 <div class="mapping-target-fields">
                   <NFormItem label="插件 / 平台" :label-props="{ for: `mapping-platform-${index}` }" required><NSelect :value="target.platform || null" :options="platformOptions(target)" filterable :loading="platforms.isPending.value" :input-props="{ id: `mapping-platform-${index}`, 'aria-label': `目标 ${index + 1} 平台` }" placeholder="选择插件平台" @update:value="selectPlatform(target, $event)" /></NFormItem>
-                  <NFormItem label="插件内模型" :label-props="{ for: `mapping-model-${index}` }" required><NSelect :value="target.model" :options="modelOptions(target)" filterable tag :loading="models.isFetching.value" :input-props="{ id: `mapping-model-${index}`, 'aria-label': `目标 ${index + 1} 模型` }" placeholder="选择或输入模型 ID" @update:value="selectModel(target, $event)" /></NFormItem>
+                  <NFormItem label="插件内模型" :label-props="{ for: `mapping-model-${index}` }" required><NSelect :value="target.model" :options="modelOptions(target)" filterable tag to="body" :loading="models.isFetching.value" :input-props="{ id: `mapping-model-${index}`, 'aria-label': `目标 ${index + 1} 模型` }" placeholder="选择或输入模型 ID" @update:value="selectModel(target, $event)" /></NFormItem>
                   <NFormItem label="尝试次数（含首次）" :label-props="{ for: `mapping-attempts-${index}` }"><NInputNumber v-model:value="target.retryCount" :min="1" :max="35" :precision="0" :show-button="false" clearable placeholder="继承插件" :input-props="{ id: `mapping-attempts-${index}`, 'aria-label': `目标 ${index + 1} 尝试次数` }" /></NFormItem>
                 </div>
                 <div class="mapping-cooldown-fields">
