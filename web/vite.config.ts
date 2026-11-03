@@ -88,5 +88,7 @@ export default defineConfig({
     environment: 'jsdom',
     globals: true,
     css: true,
+    // 管理页在 jsdom 中渲染 naive-ui / echarts 就要数秒，负载较高的机器上默认 5s 会产生假失败。
+    testTimeout: 20000,
   },
 })

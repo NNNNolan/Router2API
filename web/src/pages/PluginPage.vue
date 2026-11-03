@@ -82,7 +82,7 @@ onMounted(() => window.addEventListener('message', onMessage)); onBeforeUnmount(
     <div class="plugin-page-content">
       <div v-if="query.isPending.value" class="plugin-page-state"><NSpin /></div>
       <div v-else-if="query.isError.value" class="plugin-page-state plugin-page-error"><NAlert type="error" title="插件页面加载失败">该插件可能没有可用主页面。</NAlert></div>
-      <iframe v-else ref="frame" class="plugin-frame" sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox" :srcdoc="srcdoc" :title="`${pluginKey} 插件页面`" @load="syncAppearance" />
+      <iframe v-else ref="frame" class="plugin-frame" sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads" :srcdoc="srcdoc" :title="`${pluginKey} 插件页面`" @load="syncAppearance" />
     </div>
   </NCard>
 </template>

@@ -262,7 +262,7 @@ docker logs --tail=100 router2api
 
 ## 模型映射
 
-管理后台「模型 → 模型映射」可创建对外模型名（例如 `ds4`），添加插件 / 平台 / 插件内模型，并用上移、下移设置调用顺序。客户端在 `/v1/chat/completions`、`/v1/completions`、`/v1/responses` 或 `/v1/messages` 中直接传 `"model": "ds4"`；原有 `平台/模型` 调用方式继续可用。
+管理后台「模型 → 模型映射」可创建对外模型名（例如 `ds4`），添加插件 / 平台 / 插件内模型，并用上移、下移设置调用顺序。客户端在 `/v1/chat/completions`、`/v1/completions`、`/v1/responses`、`/v1/messages` 或 `/v1/audio/speech` 中直接传 `"model": "ds4"`；原有 `平台/模型` 调用方式继续可用。
 
 映射编辑使用一屏内的限高弹窗，目标较多时内容区滚动，保存和取消按钮保持可见。对外模型名为空时，首次选择插件模型会自动填写最后一个 `/` 后的名称，例如 `cn/deepseek-v4-flash` 填为 `deepseek-v4-flash`；不含 `/` 则直接复制，已有名称不覆盖，目标的实际模型 ID 保持完整。
 
@@ -274,6 +274,26 @@ docker logs --tail=100 router2api
 - 映射保存在 SQLite 的 `model_mappings` 表，保存后新请求立即生效，进行中的请求继续使用原快照。`/v1/models` 增加已启用且存在可用目标的映射名称。停用映射后调用该名称返回 404，不回退到单平台默认路由。
 
 对外模型名支持 1–128 个英文字母、数字及 `. _ - :`，不含 `/` 且不区分大小写。每条映射最多 32 个目标，同一插件 / 平台 / 模型不可重复。管理 API 为 `GET/POST /api/admin/model-mappings`、`PUT/DELETE /api/admin/model-mappings/{id}`，沿用管理员会话、Origin 和 CSRF 校验；不升级 Contracts 或 JS Host API。
+
+## 语音合成（/v1/audio/speech）
+
+宿主提供 OpenAI 兼容的 `POST /v1/audio/speech`，把文本交给插件合成音频。鉴权与其余 `/v1` 接口一致：`Authorization: Bearer <API Key>` 或 `x-api-key`。
+
+| 字段 | 必填 | 说明 |
+| --- | --- | --- |
+| `model` | 是 | 音频模型，沿用 `平台/模型`（例如 `doubaotts/taozi`），也可填模型映射的对外名称 |
+| `input` | 是 | 要合成的文本，最多 4096 字符 |
+| `voice` | 否 | 音色；留空由插件或账号默认值决定 |
+| `response_format` | 否 | 输出格式，例如 `mp3`、`wav`、`ogg`；留空由插件或账号默认值决定 |
+| `speed` | 否 | 语速；保留原值交给插件解释 |
+
+- 成功时宿主直接写回音频字节，`Content-Type` 跟随实际输出格式（例如 `audio/wav`、`audio/mpeg`、`audio/ogg`），不做 JSON 包装。
+- 不支持流式：携带 `"stream": true` 返回 400；客户端应一次性接收完整音频文件。
+- `model` 或 `input` 缺失、`input` 为空白或超过 4096 字符时返回 400，错误正文沿用 OpenAI 错误结构。
+- 模型不能产出音频（插件返回的是标准化完成结果而非原始音频）时返回 502 并说明原因；请改用音频模型或其模型映射。
+- 插件必须按 Router2API 插件约定走原始透传，即返回原始响应字节及其 `Content-Type`，宿主才能把音频原样交给客户端。
+- [模型映射](#模型映射)同样适用于语音合成：对外模型名解析成功后替换目标模型的 `model`，其余字段原样保留。
+- 测试窗口选择「语音合成 Audio Speech」即可试听与下载，详见[测试窗口响应](#测试窗口响应)。
 
 ## 模型图标与用量分析
 
@@ -292,6 +312,8 @@ docker logs --tail=100 router2api
 ## 测试窗口响应
 
 测试窗口展示所选 `/v1` 接口的完整响应正文，包括非 2xx 错误、纯文本和空正文；不提取回答、不渲染 Markdown。合法 JSON 使用两空格缩进，并将 `\u` 转义的中文显示为文字，保留数字原文及字段顺序；非 JSON 保持原样。HTTP 状态码和耗时单独展示，HTML 作为文本显示，不执行。这里展示的是宿主 API 返回内容，不是绕过宿主协议转换后的上游原始数据。
+
+端点下拉包含 Chat Completions、Responses、Anthropic Messages 和「语音合成 Audio Speech」。选择语音合成时填写朗读文本，并可附加音色（voice）、输出格式与语速；响应 `Content-Type` 为 `audio/*` 时改为显示播放器与「下载音频」按钮，下载文件按格式命名为 `.mp3` / `.wav` / `.ogg`，此时不再展示正文；非音频响应仍按上段规则展示原始正文。
 
 ## 验证
 

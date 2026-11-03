@@ -83,6 +83,7 @@ public static class ApiEndpoints
         app.MapPost("/v1/completions", CompletionsAsync).RequireCors("v1");
         app.MapPost("/v1/responses", ResponsesAsync).RequireCors("v1");
         app.MapPost("/v1/messages", AnthropicMessagesAsync).RequireCors("v1");
+        app.MapPost("/v1/audio/speech", SpeechAsync).RequireCors("v1");
         app.MapPost("/v1/embeddings", EmbeddingsAsync).RequireCors("v1");
         app.MapGet("/v1/models", ModelsAsync).RequireCors("v1");
         app.MapPost("/api/admin/test/chat", TestChatAsync);
@@ -670,26 +671,69 @@ public static class ApiEndpoints
         HttpContext httpContext)
         => ExecuteRequestAsync(body, TestEndpoint.AnthropicMessages, pipeline, httpContext);
 
-    private static async Task<IResult> ExecuteRequestAsync(
+    /// <summary>
+    /// OpenAI 兼容的语音合成入口：请求体用 <c>model</c> + <c>input</c>（可选 <c>voice</c>、<c>response_format</c>、<c>speed</c>），
+    /// 响应是插件直接写出的音频字节。插件必须走原始透传（<see cref="AdapterResponse.IsRawPassthrough"/>）返回音频，
+    /// 否则说明该模型不是音频模型，这里给出明确错误而不是把聊天 JSON 交给 TTS 客户端。
+    /// </summary>
+    private static async Task<IResult> SpeechAsync(
+        JsonElement body,
+        RouterPipeline pipeline,
+        HttpContext httpContext)
+    {
+        if (!SpeechRequestParser.TryParse(body, out var request, out var error) || request is null)
+        {
+            return Results.Json(
+                ProtocolApiErrors.OpenAi(error ?? "invalid speech request", StatusCodes.Status400BadRequest),
+                statusCode: StatusCodes.Status400BadRequest);
+        }
+
+        var context = CreateRequestContext(request, httpContext);
+        try
+        {
+            await pipeline.ExecuteAsync(context);
+            var response = context.Response ?? AdapterResponse.ServerError("empty response");
+            if (response.IsSuccess && !response.IsRawPassthrough)
+            {
+                return Results.Json(
+                    ProtocolApiErrors.OpenAi(
+                        "the selected model did not return audio; use an audio-producing model such as 'doubaotts/<voice>' or its model mapping",
+                        StatusCodes.Status502BadGateway,
+                        "server_error"),
+                    statusCode: StatusCodes.Status502BadGateway);
+            }
+
+            await ProtocolResponseWriter.WriteAsync(
+                httpContext,
+                response,
+                TestEndpoint.ChatCompletions,
+                request.Model,
+                httpContext.RequestAborted,
+                request);
+            return Results.Empty;
+        }
+        finally
+        {
+            if (context.Response?.Lifetime is { } lifetime) await lifetime.DisposeAsync();
+        }
+    }
+
+    private static Task<IResult> ExecuteRequestAsync(
         JsonElement body,
         TestEndpoint endpoint,
         RouterPipeline pipeline,
         HttpContext httpContext,
         TestOverrides? overrides = null)
+        => ExecuteAndWriteAsync(RequestParser.Parse(body, endpoint), endpoint, pipeline, httpContext, overrides);
+
+    private static async Task<IResult> ExecuteAndWriteAsync(
+        AdapterRequest request,
+        TestEndpoint endpoint,
+        RouterPipeline pipeline,
+        HttpContext httpContext,
+        TestOverrides? overrides = null)
     {
-        var request = RequestParser.Parse(body, endpoint);
-        CaptureRequestHeaders(
-            httpContext,
-            request,
-            captureAllHeaders: httpContext.Request.Path.StartsWithSegments("/v1", StringComparison.OrdinalIgnoreCase));
-        var context = new RequestContext
-        {
-            Request = request,
-            Services = httpContext.RequestServices,
-            TestOverrides = overrides,
-            CancellationToken = httpContext.RequestAborted,
-            TraceId = TraceIdContext.GetOrCreate(httpContext)
-        };
+        var context = CreateRequestContext(request, httpContext, overrides);
         try
         {
             await pipeline.ExecuteAsync(context);
@@ -706,6 +750,25 @@ public static class ApiEndpoints
         {
             if (context.Response?.Lifetime is { } lifetime) await lifetime.DisposeAsync();
         }
+    }
+
+    private static RequestContext CreateRequestContext(
+        AdapterRequest request,
+        HttpContext httpContext,
+        TestOverrides? overrides = null)
+    {
+        CaptureRequestHeaders(
+            httpContext,
+            request,
+            captureAllHeaders: httpContext.Request.Path.StartsWithSegments("/v1", StringComparison.OrdinalIgnoreCase));
+        return new RequestContext
+        {
+            Request = request,
+            Services = httpContext.RequestServices,
+            TestOverrides = overrides,
+            CancellationToken = httpContext.RequestAborted,
+            TraceId = TraceIdContext.GetOrCreate(httpContext)
+        };
     }
 
     private static void CaptureRequestHeaders(
