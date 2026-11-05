@@ -31,7 +31,7 @@ public sealed class DatabaseInitializerTests
             File.Exists(path).Should().BeTrue();
             using var db = database.CreateClient();
             db.Queryable<AccountEntity>().Count().Should().Be(0);
-            db.Queryable<ResourceEventEntity>().Count().Should().Be(0);
+            db.Queryable<ResourceEventEntity>().SplitTable().Count().Should().Be(0);
         }
         finally
         {

@@ -5,6 +5,7 @@ using Microsoft.Extensions.Options;
 using Router.Infrastructure.Persistence;
 using Router.Host.Security;
 using Router.Contracts.Host;
+using Router.Infrastructure.Services.Privacy;
 
 namespace Router.Host.Configuration;
 
@@ -29,8 +30,11 @@ public sealed class ConfigFileService(
     IOptionsMonitor<PluginLogOptions> pluginLogs,
     ApiKeyService apiKeys,
     ILogger<ConfigFileService> logger,
-    IOptionsMonitor<AppearanceOptions> appearance) : IConfigFileService
+    IOptionsMonitor<AppearanceOptions> appearance,
+    IOptionsMonitor<PrivacyOptions>? privacy = null) : IConfigFileService, IDisposable
 {
+    private readonly SemaphoreSlim _writeGate = new(1, 1);
+    public void Dispose() => _writeGate.Dispose();
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         WriteIndented = true
@@ -71,12 +75,17 @@ public sealed class ConfigFileService(
         logger.LogInformation("created configuration file at {ConfigPath}; precedence is Config.json > user secrets > environment", FilePath);
     }
 
-    public Task<ConfigSnapshot> SaveAsync(
+    public async Task<ConfigSnapshot> SaveAsync(
         ConfigUpdateRequest request,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
         cancellationToken.ThrowIfCancellationRequested();
+        // 所有管理员设置走同一写入门；独立护栏页面不能覆盖另一个页面刚保存的配置。
+        await _writeGate.WaitAsync(cancellationToken);
+        try
+        {
+        if (request.Privacy is { } privacyUpdate) PrivacyPolicy.Build(privacyUpdate);
 
         if (request.Appearance is { } appearanceUpdate)
         {
@@ -148,11 +157,15 @@ public sealed class ConfigFileService(
             if (appearanceSettings.Theme is not null) appearanceNode["Theme"] = appearanceSettings.Theme;
             if (appearanceSettings.ColorMode is not null) appearanceNode["ColorMode"] = appearanceSettings.ColorMode;
         }
+        if (request.Privacy is { } privacySettings)
+            root["Privacy"] = JsonSerializer.SerializeToNode(privacySettings);
 
         Directory.CreateDirectory(Path.GetDirectoryName(FilePath)!);
         WriteJson(root);
         ReloadConfiguration();
-        return Task.FromResult(Get());
+        return Get();
+        }
+        finally { _writeGate.Release(); }
     }
 
     private JsonObject BuildInitialDocument()
@@ -179,7 +192,8 @@ public sealed class ConfigFileService(
                 ["CleanupCron"] = retention.CurrentValue.CleanupCron,
                 ["MinimumPluginLogLevel"] = pluginLogs.CurrentValue.MinimumPluginLogLevel
             },
-            ["Appearance"] = new JsonObject { ["Theme"] = appearance.CurrentValue.Theme, ["ColorMode"] = appearance.CurrentValue.ColorMode }
+            ["Appearance"] = new JsonObject { ["Theme"] = appearance.CurrentValue.Theme, ["ColorMode"] = appearance.CurrentValue.ColorMode },
+            ["Privacy"] = JsonSerializer.SerializeToNode(privacy?.CurrentValue ?? new PrivacyOptions())
         };
 
     private JsonObject ReadDocument()
@@ -252,6 +266,8 @@ public sealed class ConfigUpdateRequest
     public ConfigLoggingUpdate? Logging { get; init; }
     /// <summary>可选的界面主题变更；省略时保留已有设置。</summary>
     public ConfigAppearanceUpdate? Appearance { get; init; }
+    /// <summary>护栏设置完整快照；省略时保持已有配置。</summary>
+    public PrivacyOptions? Privacy { get; init; }
 }
 
 /// <summary>管理员保存的界面主题标识，由宿主校验允许列表。</summary>

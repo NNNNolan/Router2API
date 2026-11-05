@@ -46,6 +46,10 @@ async function render(options: { empty?: boolean; fail?: boolean; failMetrics?: 
   if (options.fail) getTrend.mockRejectedValue(new Error('Unavailable'))
   else getTrend.mockResolvedValue(options.empty ? { ...report, buckets: [], requests: 0 } : report)
   vi.spyOn(api, 'platforms').mockResolvedValue([])
+  const heatmap = vi.spyOn(api, 'activityHeatmap')
+  if (options.fail) heatmap.mockRejectedValue(new Error('Unavailable'))
+  else heatmap.mockResolvedValue({ fromDay: '2025-10-19', toDay: '2026-10-18', timezone: 'Asia/Shanghai', retentionDays: 30,
+    earliestLogUtc: null, days: [], requests: 0, activeDays: 0 })
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   view = mount(DashboardPage, {
     global: {
@@ -65,6 +69,8 @@ describe('总览数据与动效', () => {
     const page = await render()
     expect(api.analytics).toHaveBeenCalledWith(expect.objectContaining({ bucket: 'hour', fromUtc: expect.any(Date), toUtc: expect.any(Date) }))
     expect(api.metrics).toHaveBeenCalledWith({ timezone: Intl.DateTimeFormat().resolvedOptions().timeZone })
+    expect(api.activityHeatmap).toHaveBeenCalledWith(Intl.DateTimeFormat().resolvedOptions().timeZone)
+    expect(page.text()).toContain('近一年请求活跃度')
     const option = page.getComponent({ name: 'VChart' }).props('option')
     expect(option.series[0].data).toEqual([6, 14])
     expect(option.series[1].data).toEqual([1, 0])
@@ -77,6 +83,7 @@ describe('总览数据与动效', () => {
 
   it('指标和趋势失败时显示错误，不展示伪造的零值或曲线', async () => {
     const page = await render({ fail: true })
+    expect(page.text()).toContain('请求活跃度加载失败')
     await vi.waitFor(() => expect(page.text()).toContain('指标暂时不可用'))
     expect(page.text()).toContain('请求趋势加载失败')
     expect(page.findAll('.metric-card')).toHaveLength(0)

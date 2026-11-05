@@ -24,7 +24,7 @@ public sealed class ResourceEventLogSink(SqlSugarDatabase database) : ILogSink<R
             EventType = item.EventType,
             Error = item.Error,
             CreatedAtUtc = item.CreatedAt.UtcDateTime
-        }).ExecuteCommand();
+        }).SplitTable().ExecuteCommand();
         return Task.CompletedTask;
     }
 }
@@ -37,6 +37,11 @@ public sealed class RequestLogStore(SqlSugarDatabase database) : ILogSink<Reques
 
     /// <summary>将宿主统计元数据与原请求日志一次写入，插件日志契约保持不变。</summary>
     public Task WriteAsync(RequestLog item, UsageMetadata? usageMetadata, CancellationToken cancellationToken = default)
+        => WriteObservedAsync(item, usageMetadata, null, cancellationToken);
+
+    /// <summary>一次写入宿主观察数据；扩展只归宿主管理接口，不进入插件日志契约。</summary>
+    public Task WriteObservedAsync(RequestLog item, UsageMetadata? usageMetadata, RequestObservation? observation,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(item);
         cancellationToken.ThrowIfCancellationRequested();
@@ -57,8 +62,11 @@ public sealed class RequestLogStore(SqlSugarDatabase database) : ILogSink<Reques
             AttemptDetailsJson = item.AttemptDetails.Count == 0
                 ? null
                 : JsonSerializer.Serialize(item.AttemptDetails),
+            PrivacyJson = observation?.Privacy is { } privacy ? JsonSerializer.Serialize(privacy) : null,
+            TraceJson = observation is null ? null : JsonSerializer.Serialize(observation.Trace),
+            Endpoint = observation?.Trace.Endpoint,
             CreatedAtUtc = item.CreatedAt.UtcDateTime
-        }).ExecuteCommand();
+        }).SplitTable().ExecuteCommand();
         return Task.CompletedTask;
     }
 
@@ -68,7 +76,7 @@ public sealed class RequestLogStore(SqlSugarDatabase database) : ILogSink<Reques
         var page = await QueryAsync(query, cancellationToken);
         var ids = page.Items.Select(item => item.Id).ToArray();
         using var db = database.CreateClient();
-        var metadata = ids.Length == 0 ? new Dictionary<string, string?>() : db.Queryable<RequestLogEntity>()
+        var metadata = ids.Length == 0 ? new Dictionary<string, string?>() : DailyLogTables.Query<RequestLogEntity>(db, query.FromUtc, query.ToUtc)
             .Where(item => ids.Contains(item.Id))
             .Select(item => new { item.Id, item.UsageMetadataJson })
             .ToList()
@@ -90,7 +98,7 @@ public sealed class RequestLogStore(SqlSugarDatabase database) : ILogSink<Reques
         var page = Math.Max(1, query.Page);
         var pageSize = query.PageSize is 20 or 50 or 100 ? query.PageSize : 20;
         using var db = database.CreateClient();
-        var source = db.Queryable<RequestLogEntity>();
+        var source = DailyLogTables.Query<RequestLogEntity>(db, query.FromUtc, query.ToUtc);
         if (query.FromUtc is { } from)
             source = source.Where(item => item.CreatedAtUtc >= from.UtcDateTime);
         if (query.ToUtc is { } to)
@@ -164,7 +172,7 @@ public sealed class TaskLogStore(SqlSugarDatabase database) : ITaskLogStore
             DurationMs = log.DurationMs,
             StartedAtUtc = log.StartedAt.UtcDateTime,
             FinishedAtUtc = log.FinishedAt?.UtcDateTime
-        }).ExecuteCommand();
+        }).SplitTable().ExecuteCommand();
         return Task.CompletedTask;
     }
 
@@ -174,6 +182,7 @@ public sealed class TaskLogStore(SqlSugarDatabase database) : ITaskLogStore
         cancellationToken.ThrowIfCancellationRequested();
         using var db = database.CreateClient();
         db.Updateable<TaskLogEntity>()
+            .AS(db.SplitHelper<TaskLogEntity>().GetTableName(log.StartedAt.UtcDateTime))
             .SetColumns(entity => new TaskLogEntity
             {
                 PluginKey = log.PluginKey,
@@ -201,7 +210,7 @@ public sealed class TaskLogStore(SqlSugarDatabase database) : ITaskLogStore
         var page = Math.Max(1, query.Page);
         var pageSize = query.PageSize is 20 or 50 or 100 ? query.PageSize : 20;
         using var db = database.CreateClient();
-        var source = db.Queryable<TaskLogEntity>()
+        var source = DailyLogTables.Query<TaskLogEntity>(db, query.FromUtc, query.ToUtc)
             .Where(item => item.AccountId != null);
         if (query.FromUtc is { } from) source = source.Where(item => item.StartedAtUtc >= from.UtcDateTime);
         if (query.ToUtc is { } to) source = source.Where(item => item.StartedAtUtc < to.UtcDateTime);
@@ -273,7 +282,7 @@ public sealed class PluginLogStore(
             DurationMs = log.DurationMs,
             DetailsJson = Limit(Sanitize(log.DetailsJson), 16_384),
             CreatedAtUtc = log.CreatedAt.UtcDateTime
-        }).ExecuteCommand();
+        }).SplitTable().ExecuteCommand();
         return Task.CompletedTask;
     }
 
@@ -300,7 +309,7 @@ public sealed class PluginLogStore(
         var page = Math.Max(1, query.Page);
         var pageSize = query.PageSize is 20 or 50 or 100 ? query.PageSize : 20;
         using var db = database.CreateClient();
-        var source = db.Queryable<PluginLogEntity>();
+        var source = DailyLogTables.Query<PluginLogEntity>(db, query.FromUtc, query.ToUtc);
         if (query.FromUtc is { } from) source = source.Where(item => item.CreatedAtUtc >= from.UtcDateTime);
         if (query.ToUtc is { } to) source = source.Where(item => item.CreatedAtUtc < to.UtcDateTime);
         if (!string.IsNullOrWhiteSpace(query.PluginKey)) source = source.Where(item => item.PluginKey == query.PluginKey);
@@ -371,18 +380,10 @@ public sealed class LogRetentionStore(SqlSugarDatabase database) : ILogRetention
         var cutoff = cutoffUtc.UtcDateTime;
         var deleted = 0;
         using var db = database.CreateClient();
-        deleted += db.Deleteable<RequestLogEntity>()
-            .Where(item => item.CreatedAtUtc < cutoff)
-            .ExecuteCommand();
-        deleted += db.Deleteable<ResourceEventEntity>()
-            .Where(item => item.CreatedAtUtc < cutoff)
-            .ExecuteCommand();
-        deleted += db.Deleteable<TaskLogEntity>()
-            .Where(item => item.StartedAtUtc < cutoff)
-            .ExecuteCommand();
-        deleted += db.Deleteable<PluginLogEntity>()
-            .Where(item => item.CreatedAtUtc < cutoff)
-            .ExecuteCommand();
+        deleted += DailyLogTables.DeleteBefore<RequestLogEntity>(db, cutoffUtc, nameof(RequestLogEntity.CreatedAtUtc));
+        deleted += DailyLogTables.DeleteBefore<ResourceEventEntity>(db, cutoffUtc, nameof(ResourceEventEntity.CreatedAtUtc));
+        deleted += DailyLogTables.DeleteBefore<TaskLogEntity>(db, cutoffUtc, nameof(TaskLogEntity.StartedAtUtc));
+        deleted += DailyLogTables.DeleteBefore<PluginLogEntity>(db, cutoffUtc, nameof(PluginLogEntity.CreatedAtUtc));
         deleted += db.Deleteable<UsageBucketEntity>()
             .Where(item => item.Day < cutoff.Date)
             .ExecuteCommand();

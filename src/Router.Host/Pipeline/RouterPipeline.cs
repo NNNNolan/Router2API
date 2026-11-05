@@ -4,6 +4,8 @@ using Router.Contracts.Domain;
 using Router.Contracts.Host;
 using Router.Contracts.Pipeline;
 using Router.Infrastructure.Services;
+using Router.Infrastructure.Services.Privacy;
+using Router.Host.Privacy;
 
 namespace Router.Host.Pipeline;
 
@@ -19,13 +21,17 @@ public sealed class RouterPipeline(
     ModelMappingHealth mappingHealth,
     ModelMappingStore? modelMappings = null,
     PluginAttemptExecutor? mappedAttempts = null,
-    IOptions<PluginExecutionOptions>? executionOptions = null)
+    IOptions<PluginExecutionOptions>? executionOptions = null,
+    PrivacyRequestGuard? privacy = null)
 {
     public async Task ExecuteAsync(RequestContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
         var stopwatch = Stopwatch.StartNew();
         var requestedModel = context.Request.Model;
+        var trace = new RequestTrace(context.Request.Endpoint);
+        PrivacyInspection? inspection = null;
+        PrivacyReport? privacyReport = null;
         var started = false;
         var cancelled = false;
         RequestUsageTracker? usageTracker = null;
@@ -33,8 +39,28 @@ public sealed class RouterPipeline(
         string normalizedModel;
         try
         {
+            using (var stage = RequestTrace.Measure("privacy"))
+            {
+                inspection = privacy?.Begin(context.Request);
+                if (inspection is not null)
+                {
+                    try { context.Request = PrivacyRequestGuard.Apply(context.Request, inspection); }
+                    catch { stage?.SetResult("failed", 500); throw; }
+                    privacyReport = inspection.Report();
+                    stage?.SetResult(inspection.Blocked ? "blocked" : inspection.DryRun ? "dry_run" : "completed",
+                        inspection.Blocked ? 403 : null);
+                    if (inspection.Blocked)
+                    {
+                        context.Response = new AdapterResponse { StatusCode = 403, Error = "request blocked by privacy guard", ErrorType = "privacy_guard_blocked" };
+                        return;
+                    }
+                }
+                else stage?.SetResult("disabled");
+            }
             context.Items["RequestedModel"] = requestedModel;
-            var mapping = modelMappings?.Find(requestedModel);
+            ModelMapping? mapping;
+            using (RequestTrace.Measure("routing"))
+                mapping = modelMappings?.Find(requestedModel);
             if (mapping is not null)
             {
                 if (!mapping.Enabled)
@@ -48,10 +74,13 @@ public sealed class RouterPipeline(
                 usageTracker = new RequestUsageTracker(executedRequest, context.Response!);
                 return;
             }
-            platform = ResolvePlatform(requestedModel, out normalizedModel);
-            context.SelectedPlatform = platform;
-            context.PluginKey = platforms.Get(platform)?.PluginKey ?? platform;
-            context.Request.Model = normalizedModel;
+            using (RequestTrace.Measure("routing"))
+            {
+                platform = ResolvePlatform(requestedModel, out normalizedModel);
+                context.SelectedPlatform = platform;
+                context.PluginKey = platforms.Get(platform)?.PluginKey ?? platform;
+                context.Request.Model = normalizedModel;
+            }
             metrics.OnRequestStarted(platform);
             started = true;
 
@@ -69,6 +98,11 @@ public sealed class RouterPipeline(
             context.AttemptDetails = result.AttemptDetails ?? [];
             usageTracker = new RequestUsageTracker(context.Request, result.Response);
         }
+        catch (PrivacyInspectionException)
+        {
+            privacyReport = inspection?.Report();
+            context.Response = AdapterResponse.ServerError("privacy guard inspection failed");
+        }
         catch (OperationCanceledException exception) when (context.CancellationToken.IsCancellationRequested)
         {
             cancelled = true;
@@ -85,6 +119,18 @@ public sealed class RouterPipeline(
         }
         finally
         {
+            if (inspection is not null && inspection.RestoreMap.Count > 0 && !inspection.Blocked && context.Response is { } guarded)
+            {
+                using var stage = RequestTrace.Measure("response.restore");
+                try { context.Response = PrivacyResponseRestorer.Restore(guarded, inspection.RestoreMap, context.Request.Endpoint); }
+                catch (PrivacyInspectionException)
+                {
+                    stage?.SetResult("failed", 502);
+                    if (guarded.Lifetime is PluginResponseLifetime owner) owner.Fail(false, "privacy response restoration failed");
+                    if (guarded.Lifetime is { } cleanup) await cleanup.DisposeAsync();
+                    context.Response = new AdapterResponse { StatusCode = 502, Error = "privacy response restoration failed" };
+                }
+            }
             if (context.Response is { } response && PluginResponseLifetime.HasStream(response))
             {
                 context.Response = PluginResponseLifetime.Ensure(response);
@@ -96,15 +142,21 @@ public sealed class RouterPipeline(
                     cancelled = completion.Cancelled;
                     await CompleteAsync(completion.Success, completion.Usage);
                 });
+                if (inspection is not null)
+                    ((PluginResponseLifetime)context.Response.Lifetime!).AddResource(() => { inspection.Dispose(); return ValueTask.CompletedTask; });
             }
             else
             {
                 await CompleteAsync(context.Response?.IsSuccess == true, context.Response?.Usage);
+                inspection?.Dispose();
             }
+            trace.Detach();
         }
 
         async ValueTask CompleteAsync(bool success, Usage? usage)
         {
+            var observation = new RequestObservation(privacyReport, trace.Complete());
+            trace.Dispose();
             stopwatch.Stop();
             var measurement = usageTracker?.Finish(success);
             usage = measurement is null ? usage : measurement.Usage;
@@ -133,9 +185,11 @@ public sealed class RouterPipeline(
                     AttemptDetails = context.AttemptDetails
                 };
                 if (requestLogs is RequestLogStore persistentLogs)
-                    await persistentLogs.WriteAsync(log, measurement?.Metadata);
+                    await persistentLogs.WriteObservedAsync(log, measurement?.Metadata, observation);
                 else
+                {
                     await requestLogs.WriteAsync(log);
+                }
                 try { await usageBuckets.RecordAsync(log); }
                 catch (Exception exception)
                 {
@@ -158,11 +212,13 @@ public sealed class RouterPipeline(
         var executedRequest = context.Request;
         foreach (var target in mapping.Targets.Where(target => target.Enabled))
         {
+            using var targetStage = RequestTrace.Measure("mapping.target", target.PluginKey, target.Platform, target.Model);
             context.CancellationToken.ThrowIfCancellationRequested();
             var label = $"{target.PluginKey}/{target.Platform}/{target.Model}";
             var registration = platforms.Get(target.Platform);
             if (registration is null || !registration.Enabled || !registration.PluginKey.Equals(target.PluginKey, StringComparison.OrdinalIgnoreCase))
             {
+                targetStage?.SetResult("unavailable");
                 details.Add(new(null, "unbound", null, "Skipped", false, $"{label}: target unavailable", 0));
                 context.AttemptDetails = details.ToArray();
                 continue;
@@ -176,6 +232,7 @@ public sealed class RouterPipeline(
             var invocation = mappingHealth.TryBegin(mapping.Id, target, out var cooldownUntil);
             if (invocation is null)
             {
+                targetStage?.SetResult("cooldown");
                 details.Add(new(null, "unbound", null, "Skipped", false,
                     $"{label}: mapping target cooling down until {cooldownUntil:O}", 0));
                 context.AttemptDetails = details.ToArray();
@@ -208,6 +265,7 @@ public sealed class RouterPipeline(
                     $"{label}: {result.Attempt.Reason ?? result.Response.Error}", 0));
             context.AttemptDetails = details.ToArray();
             var response = result.Response;
+            targetStage?.SetResult(response.IsSuccess ? "completed" : "failed", response.StatusCode);
             var hasStream = PluginResponseLifetime.HasStream(response);
             var clientInputError = response.StatusCode is 400 or 413 or 415 or 422;
             context.Response = response;

@@ -271,7 +271,12 @@ public sealed class PluginAttemptExecutor(
         PluginInvocationScope invocation,
         CancellationToken cancellationToken)
     {
-        var accountCandidates = await GetAccountsAsync(pluginKey, platformName, request, overrides, accountPolicy, cancellationToken);
+        IReadOnlyList<Account> accountCandidates;
+        using (var stage = RequestTrace.Measure("account.selection", pluginKey, platformName, request.Model))
+        {
+            accountCandidates = await GetAccountsAsync(pluginKey, platformName, request, overrides, accountPolicy, cancellationToken);
+            stage?.SetResult(accountCandidates.Count == 0 ? "unavailable" : "completed");
+        }
         if (accountCandidates.Count == 0)
             return Failure("no account available", PluginAttemptOutcome.NoPenalty, "no-account");
 
@@ -282,11 +287,15 @@ public sealed class PluginAttemptExecutor(
         var transferred = false;
         try
         {
+            using (var stage = RequestTrace.Measure("account.lease", pluginKey, platformName, request.Model))
+            {
             accountLease = await leases.AcquireAsync(
                 accountCandidates,
                 account => overrides?.SkipCooldown == true || ResourceAvailability.IsAvailable(account, DateTimeOffset.UtcNow),
                 TimeSpan.FromMilliseconds(500),
                 cancellationToken);
+            stage?.SetResult(accountLease is null ? "unavailable" : "completed");
+            }
             if (accountLease is null)
                 return Failure("no account lease available", PluginAttemptOutcome.Retry, "no-account-lease");
 
@@ -308,6 +317,7 @@ public sealed class PluginAttemptExecutor(
 
             var attemptStopwatch = Stopwatch.StartNew();
             PluginInvocationResult result;
+            using var pluginStage = RequestTrace.Measure("plugin.attempt", pluginKey, platformName, request.Model);
             try
             {
                 result = await terminal.InvokeAsync(new PluginAttemptContext
@@ -336,6 +346,13 @@ public sealed class PluginAttemptExecutor(
                     AdapterResponse.ServerError(exception.Message),
                     HostTransportFailure(policy, exception.Message, client.ObservedTransportFailure));
             }
+            catch
+            {
+                pluginStage?.SetResult(cancellationToken.IsCancellationRequested ? "cancelled" : "failed");
+                throw;
+            }
+            pluginStage?.SetResult(result.Response.IsSuccess ? "completed" : "failed", result.Response.StatusCode);
+            pluginStage?.Dispose(); // 阶段到插件返回响应为止，响应消费不算插件建立耗时。
 
             pendingResponse = result.Response;
             result = result with
@@ -438,12 +455,16 @@ public sealed class PluginAttemptExecutor(
         TestOverrides? overrides,
         CancellationToken cancellationToken)
     {
+        using var stage = RequestTrace.Measure("proxy.selection", pluginKey);
         var proxyCandidates = await GetProxiesAsync(pluginKey, overrides, cancellationToken);
         var selectedProxy = SelectProxy(proxyCandidates, overrides?.ProxyId);
         if (!string.IsNullOrWhiteSpace(overrides?.ProxyId) && selectedProxy is null)
             throw new HttpRequestException("forced proxy is unavailable");
         if (selectedProxy is null)
+        {
+            stage?.SetResult("direct");
             return null;
+        }
 
         var proxyLease = await leases.AcquireAsync(
             [selectedProxy],
@@ -451,7 +472,10 @@ public sealed class PluginAttemptExecutor(
             TimeSpan.FromMilliseconds(500),
             cancellationToken);
         if (proxyLease is null)
+        {
+            stage?.SetResult("unavailable");
             throw new HttpRequestException("no proxy lease available");
+        }
 
         try
         {

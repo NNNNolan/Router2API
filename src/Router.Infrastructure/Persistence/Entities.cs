@@ -158,7 +158,9 @@ public sealed class ProxyEndpointEntity
     public DateTime? LastSeenInSubscriptionAtUtc { get; set; }
 }
 
-[SugarTable("request_logs")]
+[SplitTable(SplitType.Day)]
+[SugarTable("request_logs_{year}{month}{day}")]
+[SugarIndex("ix_{table}_created", nameof(RequestLogEntity.CreatedAtUtc), OrderByType.Asc)]
 public sealed class RequestLogEntity
 {
     [SugarColumn(IsNullable = true)]
@@ -190,6 +192,16 @@ public sealed class RequestLogEntity
     [SugarColumn(ColumnDataType = "text", IsNullable = true)]
     public string? AttemptDetailsJson { get; set; }
 
+    [SugarColumn(ColumnDataType = "text", IsNullable = true)]
+    public string? PrivacyJson { get; set; }
+
+    [SugarColumn(ColumnDataType = "text", IsNullable = true)]
+    public string? TraceJson { get; set; }
+
+    [SugarColumn(Length = 64, IsNullable = true)]
+    public string? Endpoint { get; set; }
+
+    [SplitField]
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
 }
 
@@ -210,7 +222,9 @@ public sealed class UsageBucketEntity
     public long CompletionTokens { get; set; }
 }
 
-[SugarTable("resource_events")]
+[SplitTable(SplitType.Day)]
+[SugarTable("resource_events_{year}{month}{day}")]
+[SugarIndex("ix_{table}_created", nameof(ResourceEventEntity.CreatedAtUtc), OrderByType.Asc)]
 public sealed class ResourceEventEntity
 {
     [SugarColumn(IsPrimaryKey = true, Length = 64)]
@@ -231,10 +245,13 @@ public sealed class ResourceEventEntity
     [SugarColumn(ColumnDataType = "text", IsNullable = true)]
     public string? Error { get; set; }
 
+    [SplitField]
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
 }
 
-[SugarTable("task_logs")]
+[SplitTable(SplitType.Day)]
+[SugarTable("task_logs_{year}{month}{day}")]
+[SugarIndex("ix_{table}_started", nameof(TaskLogEntity.StartedAtUtc), OrderByType.Asc)]
 public sealed class TaskLogEntity
 {
     [SugarColumn(IsPrimaryKey = true, Length = 64)]
@@ -265,12 +282,15 @@ public sealed class TaskLogEntity
     public string? DetailsJson { get; set; }
 
     public int DurationMs { get; set; }
+    [SplitField]
     public DateTime StartedAtUtc { get; set; } = DateTime.UtcNow;
     [SugarColumn(IsNullable = true)]
     public DateTime? FinishedAtUtc { get; set; }
 }
 
-[SugarTable("plugin_logs")]
+[SplitTable(SplitType.Day)]
+[SugarTable("plugin_logs_{year}{month}{day}")]
+[SugarIndex("ix_{table}_created", nameof(PluginLogEntity.CreatedAtUtc), OrderByType.Asc)]
 public sealed class PluginLogEntity
 {
     [SugarColumn(IsPrimaryKey = true, Length = 64)]
@@ -312,5 +332,6 @@ public sealed class PluginLogEntity
     [SugarColumn(ColumnDataType = "text", IsNullable = true)]
     public string? DetailsJson { get; set; }
 
+    [SplitField]
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
 }

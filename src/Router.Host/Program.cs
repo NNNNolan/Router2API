@@ -14,6 +14,8 @@ using Router.Host.Tracing;
 using Router.Host.Web;
 using Router.Infrastructure;
 using Router.Infrastructure.Persistence;
+using Router.Infrastructure.Services.Privacy;
+using Router.Host.Privacy;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -50,6 +52,9 @@ builder.Services.AddSingleton<PasswordHasher>();
 builder.Services.AddSingleton<AdminAuthService>();
 builder.Services.AddSingleton<ApiKeyService>();
 builder.Services.AddSingleton<IConfigFileService, ConfigFileService>();
+builder.Services.AddOptions<PrivacyOptions>()
+    .Bind(builder.Configuration.GetSection("Privacy"));
+builder.Services.AddSingleton<PrivacyRequestGuard>();
 builder.Services.AddResponseCompression(options =>
 {
     options.EnableForHttps = true;

@@ -15,6 +15,8 @@ import PluginPage from '@/pages/PluginPage.vue'
 import ConfigPage from '@/pages/ConfigPage.vue'
 import ModelPlazaPage from '@/pages/ModelPlazaPage.vue'
 import ModelMappingsPage from '@/pages/ModelMappingsPage.vue'
+import PrivacyPage from '@/pages/PrivacyPage.vue'
+import TracesPage from '@/pages/TracesPage.vue'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -35,6 +37,10 @@ const router = createRouter({
         { path: 'plugins/:pluginKey', name: 'plugin-page', component: PluginPage },
         { path: 'test', name: 'test', component: TestPage },
         { path: 'logs', name: 'logs', component: LogsPage },
+        { path: 'traces', name: 'traces', component: TracesPage },
+        { path: 'traces/requests', name: 'trace-requests', component: TracesPage },
+        { path: 'traces/requests/:id', name: 'trace-request', component: TracesPage },
+        { path: 'privacy', name: 'privacy', component: PrivacyPage },
         { path: 'task-logs', name: 'task-logs', component: TaskLogsPage },
         { path: 'plugin-logs', name: 'plugin-logs', component: PluginLogsPage },
         { path: 'settings/config', name: 'config', component: ConfigPage },

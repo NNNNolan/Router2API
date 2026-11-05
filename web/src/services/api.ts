@@ -21,6 +21,21 @@ export interface ModelMappingTarget { pluginKey: string; platform: string; model
 export interface ModelMapping { id: string; name: string; enabled: boolean; targets: ModelMappingTarget[] }
 
 export interface PageResult<T> { items: T[]; page: number; pageSize: number; total: number; totalPages: number }
+export interface ActivityHeatmapDay { day: string; requests: number }
+export interface ActivityHeatmapReport { fromDay: string; toDay: string; timezone: string; retentionDays: number; earliestLogUtc: string | null; days: ActivityHeatmapDay[]; requests: number; activeDays: number }
+export type PrivacyAction = 'off' | 'warn' | 'block' | 'redact'
+export interface PrivacyCustomRule { id: string; name: string; pattern: string; enabled: boolean; action: PrivacyAction | null }
+export interface PrivacySettings { enabled: boolean; dryRun: boolean; defaultAction: PrivacyAction; categoryActions: Record<string, PrivacyAction>; customRules: PrivacyCustomRule[] }
+export interface PrivacyHit { ruleId: string; category: string; action: PrivacyAction; count: number; samples: string[] }
+export interface PrivacyReport { dryRun: boolean; blocked: boolean; redactions: number; hits: PrivacyHit[]; error: string | null }
+export interface PrivacySummary { inspected: number; matched: number; blocked: number; dryRun: number; redactions: number; categories: { category: string; hits: number }[] }
+export interface TraceStage { id: string; parentId: string; name: string; startMs: number; durationMs: number; outcome: string; statusCode: number | null; pluginKey: string | null; platform: string | null; model: string | null }
+export interface TraceData { endpoint: string; startedAt: string; durationMs: number; truncated: boolean; stages: TraceStage[] }
+export interface ObservedRequest { id: string; traceId: string; endpoint: string | null; platform: string | null; model: string | null; success: boolean; cancelled: boolean; statusCode: number; durationMs: number; createdAt: string; privacy: PrivacyReport | null; trace: TraceData | null }
+export interface TraceTopologyClient { endpoint: string; requests: number; failures: number; averageLatencyMs: number }
+export interface TraceTopologyLink extends TraceTopologyClient { pluginKey: string; attempts: number }
+export interface TraceTopology { clients: TraceTopologyClient[]; links: TraceTopologyLink[] }
+export type ObservationRange = { fromUtc?: Date; toUtc?: Date; pluginKey?: string }
 /** 测试窗口一次直连 /v1 的结果：正文或音频二选一，音频只在 content-type 为 audio/* 时出现。 */
 export interface V1TestResult { status: number; body: string; contentType: string; audio: { url: string; size: number } | null }
 export type PageParams = { page?: number; pageSize?: 20 | 50 | 100 }
@@ -222,6 +237,15 @@ export async function request<T>(path: string, init: ApiRequestInit = {}): Promi
 function page<T>(value: unknown, map: (value: unknown) => T): PageResult<T> { const raw = asObject(value); const items = asArray(raw.items ?? value).map(map); return { items, page: asNumber(raw.page) ?? 1, pageSize: asNumber(raw.pageSize) ?? 20, total: asNumber(raw.total) ?? items.length, totalPages: asNumber(raw.totalPages) ?? 1 } }
 
 export const api = {
+  activityHeatmap: (timezone: string) => request<ActivityHeatmapReport>(`/api/admin/dashboard/activity-heatmap${queryString({ timezone })}`),
+  privacySettings: () => request<PrivacySettings>('/api/admin/privacy/settings'),
+  savePrivacySettings: (body: PrivacySettings) => request<PrivacySettings>('/api/admin/privacy/settings', { method: 'PUT', body }),
+  privacyTest: (text: string) => request<{ report: PrivacyReport; text: string }>('/api/admin/privacy/test', { method: 'POST', body: { text } }),
+  privacySummary: (range: ObservationRange) => request<PrivacySummary>(`/api/admin/privacy/summary${queryString(range)}`),
+  privacyEvents: (params: ObservationRange & PageParams) => request<PageResult<ObservedRequest>>(`/api/admin/privacy/events${queryString(params)}`),
+  traceTopology: (range: ObservationRange) => request<TraceTopology>(`/api/admin/traces/topology${queryString(range)}`),
+  traceRequests: (params: ObservationRange & PageParams) => request<PageResult<ObservedRequest>>(`/api/admin/traces/requests${queryString(params)}`),
+  traceRequest: (id: string) => request<ObservedRequest>(`/api/admin/traces/requests/${encodeURIComponent(id)}`),
   appearance: () => request<AppearanceSettings>('/api/appearance'),
   login: async (username: string, password: string) => normalizePrincipal(await request<unknown>('/api/admin/login', { method: 'POST', body: { username, password } })),
   logout: () => request<void>('/api/admin/logout', { method: 'POST' }),

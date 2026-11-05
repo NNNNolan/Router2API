@@ -20,6 +20,7 @@ public static class ApiEndpoints
     public static void Map(WebApplication app)
     {
         ModelMappingEndpoints.Map(app);
+        ObservabilityEndpoints.Map(app);
         // 登录页也需要外观设置，只公开主题和明暗模式，不读取管理员配置快照。
         app.MapGet("/api/appearance", (IOptionsMonitor<AppearanceOptions> options, HttpContext context) =>
         {
@@ -890,21 +891,8 @@ public static class ApiEndpoints
         {
             var modelName = model.GetString();
             if (string.IsNullOrWhiteSpace(modelName)) continue;
-            var request = new AdapterRequest
-            {
-                Model = modelName,
-                Endpoint = baseRequest.Endpoint,
-                OriginalBody = baseRequest.OriginalBody,
-                Messages = baseRequest.Messages,
-                Stream = false,
-                MaxTokens = baseRequest.MaxTokens,
-                Temperature = baseRequest.Temperature,
-                Tools = baseRequest.Tools
-            };
-            foreach (var extension in baseRequest.Extensions)
-                request.Extensions[extension.Key] = extension.Value;
-            foreach (var header in baseRequest.RequestHeaders)
-                request.RequestHeaders[header.Key] = header.Value;
+            var request = ModelMappingRequest.Create(baseRequest, modelName);
+            request.Stream = false;
             var context = new RequestContext
             {
                 Request = request,
@@ -913,6 +901,7 @@ public static class ApiEndpoints
                 CancellationToken = httpContext.RequestAborted
             };
             await pipeline.ExecuteAsync(context);
+            if (context.Response?.Lifetime is { } lifetime) await lifetime.DisposeAsync();
             results.Add(new
             {
                 model = modelName,

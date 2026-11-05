@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, h, reactive, ref, watch } from 'vue'
+import { RouterLink } from 'vue-router'
 import { useQuery } from '@tanstack/vue-query'
 import { NAlert, NButton, NCard, NDataTable, NDatePicker, NEmpty, NIcon, NInput, NModal, NPagination, NSpin, NTag } from 'naive-ui'
 import type { DataTableColumns } from 'naive-ui'
@@ -32,6 +33,7 @@ function sourceLabel(source?: string | null) {
 const tokenCount = (value?: number) => value === undefined ? '—' : value.toLocaleString('zh-CN')
 const rows = computed(() => query.data.value?.items ?? [])
 const columns: DataTableColumns<RequestLog> = [
+  { title: '追踪', key: 'trace', width: 90, render: row => h(RouterLink, { to: `/traces/requests/${row.id}`, class: 'dashboard-link' }, { default: () => '查看链路' }) },
   { title: '时间', key: 'createdAt', width: 170, render: row => new Date(row.createdAt).toLocaleString() },
   { title: '平台', key: 'platform', width: 100, ellipsis: { tooltip: true }, render: row => row.platform || '—' },
   { title: '模型', key: 'model', width: 200, ellipsis: { tooltip: true }, render: row => row.model || '—' },

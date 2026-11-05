@@ -12,12 +12,18 @@ import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/compon
 import type { EChartsOption } from 'echarts'
 import { api, type PlatformMetric } from '@/services/api'
 import { useReducedMotion } from '@/composables/useReducedMotion'
+import ActivityHeatmap from '@/components/ActivityHeatmap.vue'
 
 use([CanvasRenderer, BarChart, LineChart, GridComponent, LegendComponent, TooltipComponent])
 const reducedMotion = useReducedMotion()
 const themeVars = useThemeVars()
 const metricsQuery = useQuery({ queryKey: ['metrics'], queryFn: () => api.metrics({ timezone: Intl.DateTimeFormat().resolvedOptions().timeZone }), refetchInterval: 15_000 })
 const platformsQuery = useQuery({ queryKey: ['platforms'], queryFn: api.platforms })
+const heatmapQuery = useQuery({
+  queryKey: ['activity-heatmap'],
+  queryFn: () => api.activityHeatmap(Intl.DateTimeFormat().resolvedOptions().timeZone),
+  refetchInterval: 60_000,
+})
 const trendQuery = useQuery({
   queryKey: ['dashboard-trend'],
   queryFn: () => {
@@ -37,7 +43,7 @@ const successRate = computed(() => {
 })
 const updatedAt = computed(() => metricsQuery.dataUpdatedAt.value
   ? new Date(metricsQuery.dataUpdatedAt.value).toLocaleTimeString('zh-CN', { hour12: false }) : '')
-const refreshing = computed(() => metricsQuery.isFetching.value || trendQuery.isFetching.value || platformsQuery.isFetching.value)
+const refreshing = computed(() => metricsQuery.isFetching.value || trendQuery.isFetching.value || platformsQuery.isFetching.value || heatmapQuery.isFetching.value)
 const chartOption = computed<EChartsOption>(() => ({
   animation: !reducedMotion.value,
   animationDuration: 260,
@@ -65,7 +71,7 @@ const columns: DataTableColumns<PlatformMetric> = [
   { title: '请求状态', key: 'status', align: 'right', render: row => h(NTag, { type: !row.requests ? 'default' : row.errors ? 'warning' : 'success', size: 'small', bordered: false }, { default: () => !row.requests ? '无请求' : row.errors ? '有失败' : '无失败' }) },
 ]
 async function refresh() {
-  await Promise.all([metricsQuery.refetch(), trendQuery.refetch(), platformsQuery.refetch()])
+  await Promise.all([metricsQuery.refetch(), trendQuery.refetch(), platformsQuery.refetch(), heatmapQuery.refetch()])
 }
 </script>
 
@@ -133,6 +139,11 @@ async function refresh() {
       </div>
     </NCard>
   </div>
+  <NCard title="近一年请求活跃度" class="dashboard-card activity-card" :bordered="false">
+    <NSpin v-if="heatmapQuery.isPending.value" />
+    <NAlert v-else-if="heatmapQuery.isError.value" type="error" title="请求活跃度加载失败"><NButton text @click="heatmapQuery.refetch()">重试</NButton></NAlert>
+    <ActivityHeatmap v-else-if="heatmapQuery.data.value" :report="heatmapQuery.data.value" />
+  </NCard>
   <NCard v-if="metrics" title="平台请求明细" class="dashboard-card" :bordered="false">
     <template #header-extra><span class="card-caption">已保留日志 · {{ updatedAt }} 更新</span></template>
     <NDataTable :columns="columns" :data="metrics.platforms" :bordered="false" :scroll-x="620"><template #empty><NEmpty description="暂无请求数据" /></template></NDataTable>

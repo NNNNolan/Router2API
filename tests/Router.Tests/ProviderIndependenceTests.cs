@@ -64,7 +64,7 @@ public sealed class ProviderIndependenceTests
                 Message = "test", DetailsJson = "Bearer unit-secret " + new string('x', 20000)
             });
             using var db = database.CreateClient();
-            var saved = db.Queryable<PluginLogEntity>().Single();
+            var saved = db.Queryable<PluginLogEntity>().SplitTable().Single();
             saved.DetailsJson.Should().NotContain("unit-secret");
             saved.DetailsJson!.Length.Should().BeLessThanOrEqualTo(16384);
         }

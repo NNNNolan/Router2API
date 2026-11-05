@@ -57,11 +57,13 @@ const navSections = computed<NavSection[]>(() => [
     },
   ] },
   { label: '日志', items: [
+    { to: '/traces', label: '链路追踪', icon: GitNetworkOutline },
     { to: '/logs', label: '审计日志', icon: DocumentTextOutline },
     { to: '/plugin-logs', label: '插件日志', icon: BugOutline },
     { to: '/task-logs', label: '任务日志', icon: DocumentTextOutline },
   ] },
   { label: '系统', items: [
+    { to: '/privacy', label: '隐私护栏', icon: SettingsOutline },
     { to: '/test', label: '测试窗口', icon: BeakerOutline },
     { to: '/settings/config', label: '配置中心', icon: SettingsOutline },
   ] },
@@ -77,7 +79,7 @@ function resetPageScroll() {
 }
 
 const pageTitle = computed(() => navSections.value.flatMap(section => section.items)
-  .flatMap(item => [item, ...item.children ?? []]).find(item => item.to === route.path)?.label ?? 'Router2API')
+  .flatMap(item => [item, ...item.children ?? []]).find(item => item.to === route.path || item.to === '/traces' && route.path.startsWith('/traces/'))?.label ?? 'Router2API')
 
 async function signOut() {
   try {

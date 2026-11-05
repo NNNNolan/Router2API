@@ -20,21 +20,22 @@ public sealed class DashboardMetricsService(SqlSugarDatabase database)
         cancellationToken.ThrowIfCancellationRequested();
         ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(dayEnd, dayStart);
         using var db = database.CreateClient();
-        var totals = db.Ado.SqlQuery<Totals>("""
+        var source = DailyLogTables.Source<RequestLogEntity>(db);
+        var totals = db.Ado.SqlQuery<Totals>($"""
             SELECT COUNT(*) AS TotalRequests,
                 COALESCE(SUM(CASE WHEN Success = 1 THEN 1 ELSE 0 END), 0) AS SuccessfulRequests,
                 COALESCE(SUM(CASE WHEN Success = 1 THEN 0 ELSE 1 END), 0) AS FailedRequests,
                 COALESCE(AVG(DurationMs), 0) AS AverageLatencyMs,
                 COALESCE(SUM(CASE WHEN CreatedAtUtc >= @dayStart AND CreatedAtUtc < @dayEnd THEN 1 ELSE 0 END), 0) AS RequestsToday,
                 COALESCE(SUM(CASE WHEN CreatedAtUtc >= @minuteStart AND CreatedAtUtc <= @now THEN 1 ELSE 0 END), 0) AS RequestsPerMinute
-            FROM request_logs
+            FROM {source}
             """, new SugarParameter("@dayStart", dayStart.UtcDateTime), new SugarParameter("@dayEnd", dayEnd.UtcDateTime),
             new SugarParameter("@minuteStart", now.AddMinutes(-1).UtcDateTime), new SugarParameter("@now", now.UtcDateTime)).Single();
         cancellationToken.ThrowIfCancellationRequested();
-        var platforms = db.Ado.SqlQuery<PlatformTotals>("""
+        var platforms = db.Ado.SqlQuery<PlatformTotals>($"""
             SELECT COALESCE(Platform, 'unknown') AS Platform, COUNT(*) AS Requests,
                 SUM(CASE WHEN Success = 1 THEN 0 ELSE 1 END) AS Errors, AVG(DurationMs) AS AverageLatencyMs
-            FROM request_logs
+            FROM {source}
             GROUP BY COALESCE(Platform, 'unknown') COLLATE NOCASE
             ORDER BY Requests DESC, Platform
             """).Select(row => new DashboardPlatformMetric(row.Platform, row.Requests, row.Errors, row.AverageLatencyMs)).ToArray();

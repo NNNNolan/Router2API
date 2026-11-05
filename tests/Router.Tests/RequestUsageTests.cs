@@ -300,7 +300,8 @@ public sealed class RequestUsageTests
         var timestamp = DateTimeOffset.UtcNow;
         var store = new RequestLogStore(database);
         await store.WriteAsync(new RequestLog { Id = "old", CreatedAt = timestamp, Usage = new(2, 3, 5) });
-        using (var db = database.CreateClient()) db.Ado.ExecuteCommand("ALTER TABLE request_logs DROP COLUMN UsageMetadataJson");
+        using (var db = database.CreateClient())
+            db.Ado.ExecuteCommand($"ALTER TABLE [{db.SplitHelper<RequestLogEntity>().GetTableName(timestamp.UtcDateTime)}] DROP COLUMN UsageMetadataJson");
         initializer.Initialize();
         initializer.Initialize();
         var page = await store.QueryAdminAsync(new(1, 20));

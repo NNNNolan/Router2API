@@ -13,7 +13,8 @@ const route = useRoute()
 const navigation = ref<HTMLElement>()
 
 function isActive(section: NavSection) {
-  return section.items.some(item => item.to === route.path || item.children?.some(child => child.to === route.path))
+  return section.items.some(item => item.to === route.path || item.to === '/traces' && route.path.startsWith('/traces/')
+    || item.children?.some(child => child.to === route.path))
 }
 
 function closeMenus(event?: MouseEvent) {

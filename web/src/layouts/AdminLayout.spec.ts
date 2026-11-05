@@ -102,8 +102,8 @@ describe('顶部和移动端导航', () => {
       expect(nav.findAll('summary').map(item => item.text())).toEqual(['总览', '模型', '资源', '插件', '日志', '系统'])
       const sections = nav.findAll('details')
       expect(sections.find(section => section.get('summary').text() === '总览')!.findAll('a').map(link => link.attributes('href'))).toEqual(['/', '/analytics'])
-      expect(sections.find(section => section.get('summary').text() === '日志')!.findAll('a').map(link => link.attributes('href'))).toEqual(['/logs', '/plugin-logs', '/task-logs'])
-      expect(sections.find(section => section.get('summary').text() === '系统')!.findAll('a').map(link => link.attributes('href'))).toEqual(['/test', '/settings/config'])
+      expect(sections.find(section => section.get('summary').text() === '日志')!.findAll('a').map(link => link.attributes('href'))).toEqual(['/traces', '/logs', '/plugin-logs', '/task-logs'])
+      expect(sections.find(section => section.get('summary').text() === '系统')!.findAll('a').map(link => link.attributes('href'))).toEqual(['/privacy', '/test', '/settings/config'])
       expect(nav.find('a[href="/models"]').text()).toContain('模型广场')
       expect(nav.find('a[href="/model-mappings"]').text()).toContain('模型映射')
       const menu = nav.findAll('details').find(item => item.text().includes('插件管理'))!
