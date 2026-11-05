@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useQuery } from '@tanstack/vue-query'
-import { NAlert, NCard, NSpin, useThemeVars } from 'naive-ui'
+import { NAlert, NSpin, useThemeVars } from 'naive-ui'
 import { api } from '@/services/api'
 import { useAppearance } from '@/composables/useAppearance'
 import { pluginAppearanceScript, type PluginAppearance } from '@/services/pluginAppearance'
@@ -78,11 +78,11 @@ function respond(event: MessageEvent, id: string, ok: boolean, body: unknown, er
 onMounted(() => window.addEventListener('message', onMessage)); onBeforeUnmount(() => window.removeEventListener('message', onMessage))
 </script>
 <template>
-  <NCard :bordered="false" class="plugin-page-card">
+  <section class="plugin-page-card">
     <div class="plugin-page-content">
       <div v-if="query.isPending.value" class="plugin-page-state"><NSpin /></div>
       <div v-else-if="query.isError.value" class="plugin-page-state plugin-page-error"><NAlert type="error" title="插件页面加载失败">该插件可能没有可用主页面。</NAlert></div>
       <iframe v-else ref="frame" class="plugin-frame" sandbox="allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox allow-downloads" :srcdoc="srcdoc" :title="`${pluginKey} 插件页面`" @load="syncAppearance" />
     </div>
-  </NCard>
+  </section>
 </template>

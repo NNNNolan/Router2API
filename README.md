@@ -69,6 +69,8 @@ dotnet run --project src/Router.Host/Router.Host.csproj --no-build --no-launch-p
 
 插件管理页面会跟随宿主黑夜模式：宿主在 sandbox iframe 内注入样式，适配常见浅色底、深色字、表单与表格，保留状态色和图片；切回日间恢复原样式，切换不重载页面。Canvas、图片中的颜色、封闭 Shadow DOM 和特殊主题控件仍需插件适配。
 
+插件主页面填满顶栏下方的实际剩余高度，不按固定顶栏高度推算；宿主仅左右各留 8px，不增加上下留白或卡片包装。长内容在 iframe 内滚动，不改变插件自己的布局。
+
 `UserSecretsId` 是 `Router2API-Public`，与原开发环境隔离。示例配置在 `src/Router.Host/Config/Config.example.json`；复制后必须自己填写密码和密钥。实际配置、数据库及运行日志均被 Git 忽略。
 
 ## 安装插件
