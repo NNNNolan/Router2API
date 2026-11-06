@@ -1,9 +1,9 @@
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query'
 import { createMemoryHistory, createRouter } from 'vue-router'
-import { NTabs } from 'naive-ui'
+import { NButton, NInput, NTabs } from 'naive-ui'
 import { afterEach, expect, it, vi } from 'vitest'
-import { api, type ObservedRequest, type TraceStage } from '@/services/api'
+import { api, type ObservedRequest, type PrivacySettings, type TraceStage } from '@/services/api'
 import PrivacyPage from './PrivacyPage.vue'
 import TracesPage from './TracesPage.vue'
 vi.mock('naive-ui', async importOriginal => ({
@@ -13,7 +13,7 @@ vi.mock('naive-ui', async importOriginal => ({
 
 let view: VueWrapper | undefined
 let client: QueryClient | undefined
-afterEach(() => { view?.unmount(); client?.clear(); vi.restoreAllMocks() })
+afterEach(() => { view?.unmount(); client?.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 const page = { items: [], page: 1, pageSize: 20, total: 0, totalPages: 0 }
 const stubs = Object.fromEntries(['NAlert', 'NButton', 'NCard', 'NDataTable', 'NEmpty', 'NFormItem', 'NInput', 'NPagination', 'NSelect', 'NSpin', 'NSwitch', 'NTabPane', 'NTabs', 'NTag'].map(name => [name, true]))
 
@@ -33,6 +33,47 @@ it('护栏关闭状态仍能编辑规则和使用测试，语音边界始终可�
   view.getComponent(NTabs).vm.$emit('update:value', 'tester')
   await flushPromises()
   expect(view.text()).toContain('检测文本')
+})
+
+it('HTTP 环境缺少 randomUUID 时仍能连续添加、编辑并保存唯一规则', async () => {
+  // 普通 HTTP 地址不提供 randomUUID，但仍提供 getRandomValues。
+  vi.stubGlobal('crypto', { getRandomValues: crypto.getRandomValues.bind(crypto) })
+  const initial: PrivacySettings = { enabled: false, dryRun: true, defaultAction: 'warn', categoryActions: {}, customRules: [
+    { id: 'existing-rule', name: '已有规则', pattern: 'EXISTING', enabled: true, action: null },
+  ] }
+  const read = vi.spyOn(api, 'privacySettings').mockResolvedValue(initial)
+  const save = vi.spyOn(api, 'savePrivacySettings').mockImplementation(async value => {
+    read.mockResolvedValue(value)
+    return value
+  })
+  vi.spyOn(api, 'privacySummary').mockResolvedValue({ inspected: 0, matched: 0, blocked: 0, dryRun: 0, redactions: 0, categories: [] })
+  vi.spyOn(api, 'privacyEvents').mockResolvedValue(page)
+  client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  view = mount(PrivacyPage, { global: { plugins: [[VueQueryPlugin, { queryClient: client }]], renderStubDefaultSlot: true, stubs } })
+  await flushPromises()
+  view.getComponent(NTabs).vm.$emit('update:value', 'rules')
+  await flushPromises()
+  const add = view.findAllComponents(NButton).find(button => button.text() === '添加规则')!
+  for (let index = 0; index < 2; index++) {
+    add.vm.$emit('click')
+    await flushPromises()
+  }
+  const rows = view.findAll('.privacy-custom-rule')
+  expect(rows).toHaveLength(3)
+  for (let index = 1; index < rows.length; index++) {
+    const inputs = rows[index]!.findAllComponents(NInput)
+    inputs[0]!.vm.$emit('update:value', `手机规则 ${index}`)
+    inputs[1]!.vm.$emit('update:value', `CONFIDENTIAL_${index}`)
+  }
+  view.findAllComponents(NButton).find(button => button.text() === '保存设置')!.vm.$emit('click')
+  await flushPromises()
+  expect(save).toHaveBeenCalledTimes(1)
+  const saved = save.mock.calls[0]![0].customRules
+  expect(saved[0]).toEqual(initial.customRules[0])
+  expect(saved.slice(1)).toEqual([1, 2].map(index => ({
+    id: expect.stringMatching(/^[A-Za-z0-9_-]{1,64}$/), name: `手机规则 ${index}`, pattern: `CONFIDENTIAL_${index}`, enabled: true, action: null,
+  })))
+  expect(new Set(saved.map(rule => rule.id)).size).toBe(3)
 })
 
 it('旧请求明确显示无追踪详情，不构造伪时间线', async () => {

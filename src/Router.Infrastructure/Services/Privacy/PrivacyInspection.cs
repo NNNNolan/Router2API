@@ -95,6 +95,9 @@ public sealed class PrivacyInspection(PrivacyPolicy policy) : IDisposable
     {
         var digits = text.Where(char.IsAsciiDigit).Select(character => character - '0').ToArray();
         if (digits.Length is < 13 or > 19 || digits.All(digit => digit == digits[0])) return false;
+        // 13 位短卡号仅接受 Visa / Maestro 的常见前缀；Luhn 本身不能区分卡号与毫秒时间戳。
+        var prefix = digits[0] * 10 + digits[1];
+        if (digits.Length == 13 && prefix is not (>= 40 and <= 49 or 50 or >= 56 and <= 69)) return false;
         var sum = 0;
         for (var index = digits.Length - 1; index >= 0; index--)
         {

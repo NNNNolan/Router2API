@@ -186,6 +186,88 @@ public sealed class PrivacyGuardTests
     }
 
     [TestMethod]
+    [DataRow("warn")]
+    [DataRow("block")]
+    [DataRow("redact")]
+    public void MillisecondTimestampsDoNotTriggerCardActions(string action)
+    {
+        using var inspection = new PrivacyInspection(PrivacyPolicy.Build(Settings(action)));
+        foreach (var text in new[]
+        {
+            "1793989416606",
+            "timestamp=1793989416606",
+            """{"timestamp":1793989416606}""",
+            "1 7939 8941 6606",
+            "1-7939-8941-6606",
+            "2793989416605"
+        })
+            inspection.Inspect(text).Should().Be(text);
+
+        inspection.Report().Hits.Should().BeEmpty();
+        inspection.Blocked.Should().BeFalse();
+        inspection.RestoreMap.Should().BeEmpty();
+    }
+
+    [TestMethod]
+    [DataRow("4222222222222")]
+    [DataRow("4222 2222 2222 2")]
+    [DataRow("5000000000005")]
+    [DataRow("5600000000002")]
+    [DataRow("6759649826430")]
+    [DataRow("30569309025904")]
+    [DataRow("378282246310005")]
+    [DataRow("2223003122003222")]
+    [DataRow("4111111111111111")]
+    [DataRow("4111 1111 1111 1111")]
+    [DataRow("4111-1111-1111-1111")]
+    [DataRow("6222020000000000000")]
+    [DataRow("8100000000000000000")]
+    public void SupportedCardNumbersStillRedact(string sample)
+    {
+        using var inspection = new PrivacyInspection(PrivacyPolicy.Build(Settings("redact")));
+
+        var placeholder = inspection.Inspect(sample);
+
+        placeholder.Should().StartWith("[R2A_");
+        inspection.RestoreMap[placeholder].Should().Be(sample);
+        inspection.Report().Hits.Should().ContainSingle(hit => hit.Category == "credit_card" && hit.Count == 1);
+    }
+
+    [TestMethod]
+    [DataRow("0000000000000")]
+    [DataRow("4222222222223")]
+    [DataRow("4111111111111112")]
+    [DataRow("5100000000003")]
+    public void InvalidCardNumbersAreNotRedacted(string sample)
+    {
+        using var inspection = new PrivacyInspection(PrivacyPolicy.Build(Settings("redact")));
+
+        inspection.Inspect(sample).Should().Be(sample);
+
+        inspection.Report().Hits.Should().BeEmpty();
+        inspection.RestoreMap.Should().BeEmpty();
+    }
+
+    [TestMethod]
+    public void CardRedactionPreservesTimestampInTheSameRequest()
+    {
+        const string json = """
+            {"model":"demo/model","messages":[{"role":"user","content":"时间戳：1793989416606，银行卡：4111 1111 1111 1111"}]}
+            """;
+        using var document = JsonDocument.Parse(json);
+        var request = RequestParser.Parse(document.RootElement);
+        using var inspection = new PrivacyInspection(PrivacyPolicy.Build(Settings("redact")));
+
+        var result = PrivacyRequestGuard.Apply(request, inspection);
+
+        var text = result.OriginalBody!.Value.GetProperty("messages")[0].GetProperty("content").GetString();
+        text.Should().Contain("1793989416606").And.Contain("[R2A_").And.NotContain("4111 1111 1111 1111");
+        result.Messages[0].Content.Should().Be(text);
+        inspection.Report().Hits.Should().ContainSingle(hit => hit.Category == "credit_card" && hit.Count == 1);
+        inspection.RestoreMap.Values.Should().ContainSingle().Which.Should().Be("4111 1111 1111 1111");
+    }
+
+    [TestMethod]
     public void MatchBudgetFailsClosedWithoutPersistingOriginals()
     {
         using var inspection = new PrivacyInspection(PrivacyPolicy.Build(Settings("redact")));

@@ -34,7 +34,10 @@ async function save() {
   finally { saving.value = false }
 }
 function addRule() {
-  draft.value?.customRules.push({ id: crypto.randomUUID(), name: '', pattern: '', enabled: true, action: null })
+  if (!draft.value) return
+  // getRandomValues 在普通 HTTP 环境也可用，randomUUID 仅限安全上下文。
+  const id = Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, '0')).join('')
+  draft.value.customRules.push({ id, name: '', pattern: '', enabled: true, action: null })
 }
 const input = ref('')
 const testing = ref(false)
