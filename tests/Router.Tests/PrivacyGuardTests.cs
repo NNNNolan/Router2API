@@ -109,6 +109,65 @@ public sealed class PrivacyGuardTests
     }
 
     [TestMethod]
+    public void DryRunScansProtocolTextWithoutChangingTheOriginalBody()
+    {
+        const string json = """{"model":"demo/model","messages":[{"role":"user","content":"person@example.com"}]}""";
+        using var document = JsonDocument.Parse(json);
+        var request = RequestParser.Parse(document.RootElement);
+        using var inspection = new PrivacyInspection(PrivacyPolicy.Build(Settings("redact", dryRun: true)));
+
+        var result = PrivacyRequestGuard.Apply(request, inspection);
+
+        result.Should().BeSameAs(request);
+        result.OriginalBody!.Value.GetRawText().Should().Be(json);
+        inspection.Report().Hits.Should().ContainSingle(hit => hit.Category == "email");
+        inspection.RestoreMap.Should().BeEmpty();
+    }
+
+    [TestMethod]
+    public void RedactPolicyWithNoMatchesKeepsTheOriginalRequest()
+    {
+        const string json = """{"model":"demo/model","messages":[{"role":"user","content":"ordinary text"}]}""";
+        using var document = JsonDocument.Parse(json);
+        var request = RequestParser.Parse(document.RootElement);
+        using var inspection = new PrivacyInspection(PrivacyPolicy.Build(Settings("redact")));
+
+        var result = PrivacyRequestGuard.Apply(request, inspection);
+
+        result.Should().BeSameAs(request);
+        result.OriginalBody!.Value.GetRawText().Should().Be(json);
+        inspection.Report().Hits.Should().BeEmpty();
+    }
+
+    [TestMethod]
+    public void RedactScanCountsEachOccurrenceOnceBeforeWriting()
+    {
+        const string json = """{"model":"demo/model","messages":[{"role":"user","content":"person@example.com person@example.com"}]}""";
+        using var document = JsonDocument.Parse(json);
+        var request = RequestParser.Parse(document.RootElement);
+        using var inspection = new PrivacyInspection(PrivacyPolicy.Build(Settings("redact")));
+
+        var result = PrivacyRequestGuard.Apply(request, inspection);
+
+        inspection.Report().Hits.Single(hit => hit.Category == "email").Count.Should().Be(2);
+        result.OriginalBody!.Value.GetProperty("messages")[0].GetProperty("content").GetString()
+            .Should().NotContain("person@example.com");
+    }
+
+    [TestMethod]
+    public void StandardRequestDryRunScansWithoutCreatingARewrittenRequest()
+    {
+        var request = new AdapterRequest { Messages = [new AdapterMessage("user", "person@example.com")] };
+        using var inspection = new PrivacyInspection(PrivacyPolicy.Build(Settings("redact", dryRun: true)));
+
+        var result = PrivacyRequestGuard.Apply(request, inspection);
+
+        result.Should().BeSameAs(request);
+        inspection.Report().Hits.Should().ContainSingle(hit => hit.Category == "email" && hit.Count == 1);
+        inspection.RestoreMap.Should().BeEmpty();
+    }
+
+    [TestMethod]
     [DataRow("api_key", "sk-unit0123456789abcdefghijklmnop")]
     [DataRow("aws_key", "AKIA0123456789ABCDEF")]
     [DataRow("jwt", "eyJabcdefghijk.abcdefghijkl.abcdefghijkl")]

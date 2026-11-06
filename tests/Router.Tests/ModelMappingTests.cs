@@ -70,6 +70,17 @@ public sealed class ModelMappingTests : IDisposable
     }
 
     [TestMethod]
+    [DataRow("provider/model")]
+    [DataRow("bad name")]
+    [DataRow("")]
+    public void FindSkipsNamesThatCannotBeSavedAsAliases(string name)
+    {
+        var path = Path.Combine(AppContext.BaseDirectory, "test-data", $"mapping-uninitialized-{Guid.NewGuid():N}.db");
+        var database = new SqlSugarDatabase(Options.Create(new DatabaseOptions { Path = path }), NullLogger<SqlSugarDatabase>.Instance);
+        new ModelMappingStore(database, _health).Find(name).Should().BeNull();
+    }
+
+    [TestMethod]
     public void ModelListVisibilityPersistsAndLegacyTargetsRemainVisible()
     {
         var saved = Save([Target("a", 1) with { HideFromModelList = true }]);

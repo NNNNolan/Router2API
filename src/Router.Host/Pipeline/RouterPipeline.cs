@@ -27,6 +27,7 @@ public sealed class RouterPipeline(
     public async Task ExecuteAsync(RequestContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
+        _ = usageBuckets; // 保留历史构造签名及 DI 注册兼容，不再在请求完成热路径写入旧聚合表。
         var stopwatch = Stopwatch.StartNew();
         var requestedModel = context.Request.Model;
         var trace = new RequestTrace(context.Request.Endpoint);
@@ -158,7 +159,19 @@ public sealed class RouterPipeline(
             var observation = new RequestObservation(privacyReport, trace.Complete());
             trace.Dispose();
             stopwatch.Stop();
-            var measurement = usageTracker?.Finish(success);
+            var usageStarted = Stopwatch.GetTimestamp();
+            UsageMeasurement? measurement = null;
+            var usageOutcome = "failed";
+            try
+            {
+                measurement = usageTracker?.Finish(success);
+                usageOutcome = measurement is null ? "skipped" : measurement.Metadata.Warning is null ? "completed" : "incomplete";
+            }
+            finally
+            {
+                logger.LogDebug("usage settlement finished traceId={TraceId} durationMs={DurationMs} outcome={Outcome}",
+                    context.TraceId, Stopwatch.GetElapsedTime(usageStarted).TotalMilliseconds, usageOutcome);
+            }
             usage = measurement is null ? usage : measurement.Usage;
             if (measurement?.Metadata.Warning is { } warning)
                 logger.LogWarning("usage observation incomplete traceId={TraceId} reason={Reason}", context.TraceId, warning);
@@ -170,6 +183,8 @@ public sealed class RouterPipeline(
                 (int)stopwatch.ElapsedMilliseconds,
                 success,
                 usage);
+            var persistenceStarted = Stopwatch.GetTimestamp();
+            var persistenceOutcome = "failed";
             try
             {
                 var log = new RequestLog
@@ -190,15 +205,16 @@ public sealed class RouterPipeline(
                 {
                     await requestLogs.WriteAsync(log);
                 }
-                try { await usageBuckets.RecordAsync(log); }
-                catch (Exception exception)
-                {
-                    logger.LogError(exception, "usage bucket persistence failed traceId={TraceId}", context.TraceId);
-                }
+                persistenceOutcome = "completed";
             }
             catch (Exception exception)
             {
                 logger.LogError(exception, "request log persistence failed traceId={TraceId}", context.TraceId);
+            }
+            finally
+            {
+                logger.LogDebug("request log persistence finished traceId={TraceId} durationMs={DurationMs} outcome={Outcome}",
+                    context.TraceId, Stopwatch.GetElapsedTime(persistenceStarted).TotalMilliseconds, persistenceOutcome);
             }
         }
     }

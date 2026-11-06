@@ -53,8 +53,8 @@ public sealed class ProxySubscriptionService(
     public async Task DeleteAsync(string id, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        var proxies = await proxyStore.ListAsync(cancellationToken);
-        foreach (var proxy in proxies.Where(proxy => proxy.SubscriptionId == id).ToArray())
+        var proxies = await ListSubscriptionProxiesAsync(id, cancellationToken);
+        foreach (var proxy in proxies)
             await proxyStore.RemoveAsync(proxy.Id, cancellationToken);
 
         using var db = database.CreateClient();
@@ -73,13 +73,20 @@ public sealed class ProxySubscriptionService(
         response.EnsureSuccessStatusCode();
         var body = await response.Content.ReadAsStringAsync(cancellationToken);
         var parsed = ParseLines(body, subscription).ToArray();
-        var existing = await proxyStore.ListAsync(cancellationToken);
-        var current = existing.Where(x => x.SubscriptionId == id).ToDictionary(x => x.EndpointKey);
+        var existing = await ListSubscriptionProxiesAsync(id, cancellationToken);
+        var current = existing.ToDictionary(x => x.EndpointKey);
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var added = 0;
         var updated = 0;
         var draining = 0;
         var probeQueue = new List<ProxyEndpoint>();
+        var addedProxies = new List<ProxyEndpoint>();
+        var updatedProxies = new List<ProxyEndpoint>();
+        var changedConnections = new List<(ProxyEndpoint Proxy, long ExpectedVersion)>();
+        var removeIds = new List<string>();
+        var drainingIds = new List<string>();
+        var markDrainingIds = new List<string>();
+        var seenIds = new List<string>();
 
         foreach (var proxy in parsed)
         {
@@ -87,11 +94,13 @@ public sealed class ProxySubscriptionService(
             {
                 seen.Add(proxy.EndpointKey);
                 proxy.Id = previous.Id;
-                proxy.ConfigurationVersion = HasConnectionChanged(previous, proxy)
+                var connectionChanged = HasConnectionChanged(previous, proxy);
+                seenIds.Add(proxy.Id);
+                proxy.ConfigurationVersion = connectionChanged
                     ? previous.ConfigurationVersion + 1
                     : previous.ConfigurationVersion;
                 proxy.Status.Version = previous.Status.Version;
-                if (HasConnectionChanged(previous, proxy))
+                if (connectionChanged)
                 {
                     proxy.LatencyMs = 0;
                     proxy.AverageLatencyMs = 0;
@@ -120,12 +129,13 @@ public sealed class ProxySubscriptionService(
                         probeQueue.Add(proxy);
                 }
                 proxy.LastSeenInSubscriptionAt = DateTimeOffset.UtcNow;
-                await proxyStore.SaveAsync(proxy, cancellationToken);
+                if (connectionChanged) changedConnections.Add((proxy, previous.ConfigurationVersion));
+                else updatedProxies.Add(proxy);
                 updated++;
             }
             else
             {
-                await proxyStore.SaveAsync(proxy, cancellationToken);
+                addedProxies.Add(proxy);
                 added++;
                 probeQueue.Add(proxy);
             }
@@ -135,10 +145,30 @@ public sealed class ProxySubscriptionService(
         {
             previous.Status.State = ResourceState.Draining;
             draining++;
+            markDrainingIds.Add(previous.Id);
             if (previous.Status.InFlight == 0)
-                await proxyStore.RemoveAsync(previous.Id, cancellationToken);
+                removeIds.Add(previous.Id);
             else
-                await proxyStore.SaveAsync(previous, cancellationToken);
+                drainingIds.Add(previous.Id);
+        }
+
+        if (proxyStore is ProxyStore store)
+        {
+            await store.InsertSubscriptionBatchAsync(addedProxies, cancellationToken);
+            await store.UpdateSubscriptionSeenBatchAsync(updatedProxies, cancellationToken);
+            foreach (var (proxy, expectedVersion) in changedConnections)
+                await store.UpdateSubscriptionConnectionAsync(proxy, expectedVersion, cancellationToken);
+            await store.ReactivateDrainingBatchAsync(seenIds, cancellationToken);
+            await store.MarkSubscriptionDrainingBatchAsync(markDrainingIds, cancellationToken);
+            await store.RemoveBatchAsync(removeIds, cancellationToken);
+        }
+        else
+        {
+            foreach (var proxy in addedProxies.Concat(updatedProxies).Concat(changedConnections.Select(item => item.Proxy)))
+                await proxyStore.SaveAsync(proxy, cancellationToken);
+            foreach (var proxyId in removeIds) await proxyStore.RemoveAsync(proxyId, cancellationToken);
+            foreach (var proxy in current.Values.Where(value => drainingIds.Contains(value.Id)))
+                await proxyStore.SaveAsync(proxy, cancellationToken);
         }
 
         subscription.LastFetchedAt = DateTimeOffset.UtcNow;
@@ -180,6 +210,16 @@ public sealed class ProxySubscriptionService(
 
         return new RefreshResult(added, updated, draining, parsed.Length);
     }
+
+    private Task<IReadOnlyList<ProxyEndpoint>> ListSubscriptionProxiesAsync(string id, CancellationToken cancellationToken)
+        => proxyStore is ProxyStore store
+            ? store.ListBySubscriptionAsync(id, cancellationToken)
+            : ListFromStoreAsync(id, cancellationToken);
+
+    private async Task<IReadOnlyList<ProxyEndpoint>> ListFromStoreAsync(string id, CancellationToken cancellationToken)
+        => (await proxyStore.ListAsync(cancellationToken))
+            .Where(proxy => proxy.SubscriptionId == id)
+            .ToArray();
 
     private static IEnumerable<ProxyEndpoint> ParseLines(string body, ProxySubscription subscription)
     {

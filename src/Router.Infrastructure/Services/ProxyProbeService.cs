@@ -79,7 +79,7 @@ public sealed class ProxyProbeService(
             proxy.ProbeError = null;
             proxy.ProbeStatus = "Healthy";
             proxy.ProbeConfigurationVersion = proxy.ConfigurationVersion;
-            await store.SaveAsync(proxy, cancellationToken);
+            if (!await SaveProbeResultAsync(proxy, cancellationToken)) return SupersededResult();
             return new ProxyProbeResult(total == 65536, latency, speed, proxy.ProbeStatus);
         }
         catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException or IOException)
@@ -100,10 +100,24 @@ public sealed class ProxyProbeService(
         proxy.ProbeStatus = "Failed";
         proxy.ProbeError = error;
         proxy.ProbeConfigurationVersion = proxy.ConfigurationVersion;
-        await store.SaveAsync(proxy, cancellationToken);
+        if (!await SaveProbeResultAsync(proxy, cancellationToken)) return SupersededResult();
         logger.LogDebug("proxy probe failed proxyId={ProxyId} error={Error}", proxy.Id, error);
         return new ProxyProbeResult(false, Math.Max(1, (int)stopwatch.ElapsedMilliseconds), 0, "Failed", error);
     }
+
+    private Task<bool> SaveProbeResultAsync(ProxyEndpoint proxy, CancellationToken cancellationToken)
+        => store is ProxyStore proxyStore
+            ? proxyStore.SaveProbeResultAsync(proxy, cancellationToken)
+            : SaveThroughInterfaceAsync(proxy, cancellationToken);
+
+    private async Task<bool> SaveThroughInterfaceAsync(ProxyEndpoint proxy, CancellationToken cancellationToken)
+    {
+        await store.SaveAsync(proxy, cancellationToken);
+        return true;
+    }
+
+    private static ProxyProbeResult SupersededResult()
+        => new(false, 0, 0, "Superseded", "Probe result was discarded because the proxy changed or was removed.");
 
     private static double CalculateScore(int latency, double speed)
         => Math.Round((1000d / Math.Max(1, latency)) + Math.Log10(Math.Max(1, speed)), 4);

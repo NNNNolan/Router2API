@@ -22,6 +22,7 @@ public sealed class PrivacyInspection(PrivacyPolicy policy) : IDisposable
     /// <summary>还原映射只属于此请求，禁止序列化或放进日志。</summary>
     public IReadOnlyDictionary<string, string> RestoreMap => _originals;
     public bool DryRun => policy.Options.DryRun;
+    public bool CanRedact => policy.Rules.Any(rule => rule.Action == "redact");
     public bool Blocked => _blocked && !DryRun;
 
     /// <summary>扫描一个已经过协议边界选择的文本，不扫描结构标识或二进制。</summary>

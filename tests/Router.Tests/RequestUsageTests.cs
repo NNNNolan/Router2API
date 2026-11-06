@@ -292,6 +292,37 @@ public sealed class RequestUsageTests
     }
 
     [TestMethod]
+    public async Task AnalyticsProjectionPreservesNearestRankP95ForRangeAndBuckets()
+    {
+        var sqlLogger = new SqlCaptureLogger();
+        var database = new SqlSugarDatabase(Options.Create(new DatabaseOptions
+        {
+            Path = Path.Combine(Path.GetTempPath(), $"router-usage-{Guid.NewGuid():N}.db")
+        }), sqlLogger);
+        new DatabaseInitializer(database, NullLogger<DatabaseInitializer>.Instance).Initialize();
+        var store = new RequestLogStore(database);
+        var start = new DateTimeOffset(2026, 10, 20, 0, 0, 0, TimeSpan.Zero);
+        foreach (var (offset, duration) in new[] { (0, 1), (1, 10), (16, 20), (17, 100) })
+            await store.WriteAsync(new RequestLog { Platform = "test", Model = "test/model", CreatedAt = start.AddMinutes(offset),
+                DurationMs = duration, Success = true, Usage = new(1, 1, 2) });
+
+        var report = await new AnalyticsService(database).QueryUsageAsync(new(start, start.AddHours(1), Bucket: "15m"));
+
+        report.P95LatencyMs.Should().Be(100);
+        report.Buckets.Select(bucket => bucket.P95LatencyMs).Should().Equal(10, 100);
+        var analyticsSql = sqlLogger.Statements.Single(statement => statement.Contains("SELECT", StringComparison.OrdinalIgnoreCase)
+            && statement.Contains("UsageJson", StringComparison.OrdinalIgnoreCase));
+        // SplitTable keeps its full entity-column UNION internally; the ORM result projection must stay narrow.
+        var outerFrom = analyticsSql.IndexOf("FROM", analyticsSql.IndexOf("SELECT", StringComparison.OrdinalIgnoreCase),
+            StringComparison.OrdinalIgnoreCase);
+        outerFrom.Should().BeGreaterThan(0);
+        var resultProjection = analyticsSql[..outerFrom];
+        resultProjection.Should().Contain("CreatedAtUtc").And.Contain("Platform").And.Contain("Model")
+            .And.Contain("Success").And.Contain("DurationMs").And.Contain("UsageJson").And.Contain("UsageMetadataJson")
+            .And.NotContain("TraceJson").And.NotContain("PrivacyJson").And.NotContain("AttemptDetailsJson");
+    }
+
+    [TestMethod]
     public async Task ExistingDatabaseRetainsOldLogsAndAddsNullableMetadataIdempotently()
     {
         var database = TestDatabase();
@@ -331,7 +362,8 @@ public sealed class RequestUsageTests
         executor.Setup(value => value.ExecuteAsync("test", "test", terminal, It.IsAny<AdapterRequest>(), It.IsAny<string>(), It.IsAny<TestOverrides>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new PluginInvocationResult(response, new PluginAttemptResult(PluginAttemptOutcome.Healthy, 200)));
         var metrics = new RealtimeMetrics();
-        var pipeline = new RouterPipeline(new ModelRouter(platforms), platforms, executor.Object, metrics, store, Mock.Of<IUsageBucketStore>(), NullLogger<RouterPipeline>.Instance, new ModelMappingHealth());
+        var usageBuckets = new Mock<IUsageBucketStore>();
+        var pipeline = new RouterPipeline(new ModelRouter(platforms), platforms, executor.Object, metrics, store, usageBuckets.Object, NullLogger<RouterPipeline>.Instance, new ModelMappingHealth());
         var request = new RequestContext { Request = new AdapterRequest { Model = "test/model", Stream = true }, CancellationToken = cancellation.Token };
         await pipeline.ExecuteAsync(request);
         (await store.QueryAsync(new(1, 20))).Total.Should().Be(0);
@@ -346,6 +378,7 @@ public sealed class RequestUsageTests
         var page = await store.QueryAsync(new(1, 20));
         page.Total.Should().Be(1);
         var log = page.Items.Single();
+        usageBuckets.Verify(value => value.RecordAsync(It.IsAny<RequestLog>(), It.IsAny<CancellationToken>()), Times.Never);
         log.Success.Should().Be(outcome == "complete");
         log.Cancelled.Should().Be(outcome == "cancel");
         log.Usage.Should().Be(new Usage(2, 3, 5));

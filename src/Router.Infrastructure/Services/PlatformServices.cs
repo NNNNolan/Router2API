@@ -122,23 +122,35 @@ public sealed class ModelCatalog(
                 try
                 {
                     token.ThrowIfCancellationRequested();
+                    if (!forceRefresh && registration.ModelCacheTtl > TimeSpan.Zero
+                        && _cache.TryGetValue(platform, out var currentSlot))
+                    {
+                        var queued = Volatile.Read(ref currentSlot.Value);
+                        if (queued is not null && ReferenceEquals(queued.Terminal, registration.Terminal)
+                            && queued.ExpiresAt > DateTimeOffset.UtcNow)
+                            return queued.Models;
+                    }
+
                     using var client = transport.CreateClient(null, new PluginHttpClientOptions
                     {
                         AllowAutoRedirect = true,
                         RequestTimeout = ModelQueryTimeout
                     });
                     client.DefaultRequestHeaders.UserAgent.ParseAdd("Router2API/1.0 model-discovery");
-                    return await registration.Terminal.GetModelsAsync(
+                    var models = await registration.Terminal.GetModelsAsync(
                         new ModelQueryContext(HttpClient: client, ForceRefresh: forceRefresh), token);
+                    token.ThrowIfCancellationRequested();
+                    // 在释放终端执行门前发布缓存，排队的普通查询才能复用结果。
+                    if (registration.ModelCacheTtl > TimeSpan.Zero
+                        && _cache.TryGetValue(platform, out var current) && ReferenceEquals(current, slot))
+                        Volatile.Write(ref slot.Value, new CacheEntry(registration.Terminal, models, DateTimeOffset.UtcNow.Add(registration.ModelCacheTtl)));
+                    return models;
                 }
                 finally { gate.Release(); }
             });
             // 即使插件返回的异步任务忽略取消，也只等待到截止时间；TrackedTerminal 仍跟踪其真实退出。
             var models = await query.WaitAsync(token);
             token.ThrowIfCancellationRequested();
-            // 失效时会移除缓存槽，旧版本迟到的查询结果不能重新写入当前缓存。
-            if (registration.ModelCacheTtl > TimeSpan.Zero)
-                Volatile.Write(ref slot.Value, new CacheEntry(registration.Terminal, models, DateTimeOffset.UtcNow.Add(registration.ModelCacheTtl)));
             return models;
         }
         catch (OperationCanceledException exception) when (!cancellationToken.IsCancellationRequested && deadline.IsCancellationRequested)

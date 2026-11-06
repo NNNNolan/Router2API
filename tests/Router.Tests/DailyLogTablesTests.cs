@@ -46,8 +46,6 @@ public sealed class DailyLogTablesTests
         var report = await new AnalyticsService(database).QueryUsageAsync(new(first.AddSeconds(-1), second.AddSeconds(1)));
         report.Requests.Should().Be(2);
         report.Tokens.Should().Be(6);
-        (await new ActivityHeatmapService(database).QueryAsync(TimeZoneInfo.Utc, second.AddMinutes(1), 30))
-            .Days.Single(day => day.Day == "2026-10-30").Requests.Should().Be(1);
         await new LogRetentionStore(database).DeleteBeforeAsync(second);
         using (var db = database.CreateClient()) db.DbMaintenance.IsAnyTable("request_logs_20261030", false).Should().BeFalse();
         (await requests.QueryAsync(new(1, 20))).Total.Should().Be(1);

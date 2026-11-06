@@ -33,6 +33,7 @@ public sealed class ModelMappingStore(SqlSugarDatabase database, ModelMappingHea
     /// <summary>按不区分大小写的对外模型名读取映射。</summary>
     public ModelMapping? Find(string name)
     {
+        if (!IsValidName(name)) return null;
         var key = name.ToUpperInvariant();
         using var db = database.CreateClient();
         var row = db.Queryable<ModelMappingEntity>().First(row => row.NameKey == key);
@@ -46,7 +47,7 @@ public sealed class ModelMappingStore(SqlSugarDatabase database, ModelMappingHea
     {
         ArgumentNullException.ThrowIfNull(mapping);
         var name = mapping.Name?.Trim() ?? "";
-        if (name.Length is < 1 or > 128 || name.Any(character => !char.IsAsciiLetterOrDigit(character) && character is not ('.' or '_' or '-' or ':')))
+        if (!IsValidName(name))
             throw new ArgumentException("对外模型名须为 1–128 个英文字母、数字或 . _ - :，不能包含 /。");
         if (mapping.Targets is null || mapping.Targets.Count is < 1 or > 32)
             throw new ArgumentException("每个映射须包含 1–32 个目标。");
@@ -97,6 +98,10 @@ public sealed class ModelMappingStore(SqlSugarDatabase database, ModelMappingHea
 
     private static bool ValidIdentifier(string? value, int limit)
         => !string.IsNullOrWhiteSpace(value) && value.Length <= limit && !value.Any(char.IsControl);
+
+    private static bool IsValidName(string? name)
+        => name is { Length: >= 1 and <= 128 }
+            && name.All(character => char.IsAsciiLetterOrDigit(character) || character is '.' or '_' or '-' or ':');
 
     private static ModelMapping Decode(ModelMappingEntity row)
         => new(row.Id, row.Name, row.Enabled, (JsonSerializer.Deserialize<ModelMappingTarget[]>(row.TargetsJson)

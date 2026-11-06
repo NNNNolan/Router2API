@@ -1,6 +1,5 @@
 using System.Globalization;
 using System.Text.Json;
-using Microsoft.Extensions.Options;
 using Router.Host.Configuration;
 using Router.Host.Privacy;
 using Router.Infrastructure.Services;
@@ -13,7 +12,6 @@ internal static class ObservabilityEndpoints
 {
     public static void Map(WebApplication app)
     {
-        app.MapGet("/api/admin/dashboard/activity-heatmap", Heatmap);
         app.MapGet("/api/admin/privacy/settings", (HttpContext context) =>
             Results.Ok(context.RequestServices.GetRequiredService<PrivacyRequestGuard>().Settings));
         app.MapPut("/api/admin/privacy/settings", SavePrivacy);
@@ -29,16 +27,6 @@ internal static class ObservabilityEndpoints
                 ? Results.Ok(request) : Results.NotFound(new { error = "请求记录不存在。" }));
         app.MapGet("/api/admin/traces/topology", (HttpContext context, RequestObservationsService observations) =>
             InRange(context, (from, to) => Results.Ok(observations.Topology(from, to, PluginFilter(context), context.RequestAborted))));
-    }
-
-    private static async Task<IResult> Heatmap(HttpContext context, ActivityHeatmapService heatmap, IOptionsMonitor<LogRetentionOptions> logging)
-    {
-        var name = context.Request.Query["timezone"].ToString();
-        TimeZoneInfo zone;
-        try { zone = string.IsNullOrWhiteSpace(name) ? TimeZoneInfo.FindSystemTimeZoneById("Asia/Shanghai") : TimeZoneInfo.FindSystemTimeZoneById(name); }
-        catch (TimeZoneNotFoundException) { return Results.BadRequest(new { error = "时区无效。" }); }
-        catch (InvalidTimeZoneException) { return Results.BadRequest(new { error = "时区无效。" }); }
-        return Results.Ok(await heatmap.QueryAsync(zone, DateTimeOffset.UtcNow, logging.CurrentValue.DataRetentionDays, context.RequestAborted));
     }
 
     private static async Task<IResult> SavePrivacy(PrivacyOptions body, IConfigFileService config, HttpContext context)

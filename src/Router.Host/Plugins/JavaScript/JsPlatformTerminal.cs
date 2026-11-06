@@ -397,6 +397,7 @@ internal sealed partial class JsPlatformTerminal : IPlatformTerminal, IPluginMod
         {
             using var queue = CancellationTokenSource.CreateLinkedTokenSource(context.Token, ownerToken);
             queue.CancelAfter(_host.Execution.QueueTimeout);
+            var queueStage = RequestTrace.Measure("js.slot.wait", Manifest.Id, Manifest.Platform.Name);
             try
             {
                 await local.WaitAsync(queue.Token);
@@ -404,22 +405,36 @@ internal sealed partial class JsPlatformTerminal : IPlatformTerminal, IPluginMod
                 await global.WaitAsync(queue.Token);
                 globalTaken = true;
             }
-            catch (OperationCanceledException) when (!context.Token.IsCancellationRequested)
+            catch (OperationCanceledException)
             {
-                throw new JsPluginBusyException();
+                queueStage?.SetResult(context.Token.IsCancellationRequested ? "cancelled" : "busy");
+                if (!context.Token.IsCancellationRequested) throw new JsPluginBusyException();
+                throw;
             }
-            finally { Interlocked.Decrement(ref _waiting); }
+            finally
+            {
+                queueStage?.Dispose();
+                Interlocked.Decrement(ref _waiting);
+            }
 
-            var invocation = new JsInvocation(_program, Manifest, _capabilities, _host.Execution, context, local, global,
-                () => Interlocked.Decrement(ref _inFlight), ownerToken);
-            owned = true;
-            localTaken = globalTaken = false;
+            JsInvocation? invocation = null;
+            var initializationStage = RequestTrace.Measure("js.invocation.initialize", Manifest.Id, Manifest.Platform.Name);
             try
             {
+                invocation = new JsInvocation(_program, Manifest, _capabilities, _host.Execution, context, local, global,
+                    () => Interlocked.Decrement(ref _inFlight), ownerToken);
+                owned = true;
+                localTaken = globalTaken = false;
                 await invocation.InitializeAsync();
                 return invocation;
             }
-            catch { await invocation.DisposeAsync(); throw; }
+            catch
+            {
+                initializationStage?.SetResult("failed");
+                if (invocation is not null) await invocation.DisposeAsync();
+                throw;
+            }
+            finally { initializationStage?.Dispose(); }
         }
         finally
         {

@@ -144,6 +144,210 @@ public sealed class ProxySubscriptionTests
         }
     }
 
+    [TestMethod]
+    public async Task RefreshOfUnchangedProxyOnlyUpdatesSubscriptionSeenTime()
+    {
+        var directory = Path.Combine(AppContext.BaseDirectory, "test-data");
+        Directory.CreateDirectory(directory);
+        var path = Path.Combine(directory, $"router2api-{Guid.NewGuid():N}.db");
+        var database = new SqlSugarDatabase(
+            Options.Create(new DatabaseOptions { Path = path }),
+            NullLogger<SqlSugarDatabase>.Instance);
+        try
+        {
+            new DatabaseInitializer(database, NullLogger<DatabaseInitializer>.Instance).Initialize();
+            var store = new ProxyStore(database);
+            var proxy = new ProxyEndpoint
+            {
+                Id = "unchanged-proxy",
+                SubscriptionId = "subscription-seen",
+                Host = "proxy.example.com",
+                Port = 8080,
+                Username = "user",
+                Password = "pass",
+                LatencyMs = 37,
+                AverageLatencyMs = 45,
+                AverageSpeedBytesPerSecond = 12_345,
+                CompositeScore = 91.25,
+                LastProbeAt = DateTimeOffset.UtcNow,
+                LastProbeSuccessAt = DateTimeOffset.UtcNow,
+                ProbeStatus = "Healthy",
+                ProbeConfigurationVersion = 1,
+                ProbeError = "retained diagnostic",
+                Status = new ResourceStatus { State = ResourceState.Draining, InFlight = 2, Version = 7 }
+            };
+            await store.SaveAsync(proxy);
+            using var service = new ProxySubscriptionService(
+                database,
+                store,
+                new StaticHttpClientFactory("http://user:pass@proxy.example.com:8080"),
+                Mock.Of<IProxyProbeService>());
+            await service.SaveAsync(new ProxySubscription
+            {
+                Id = "subscription-seen",
+                Name = "unchanged",
+                Url = "https://feed.test/proxies"
+            });
+
+            var result = await service.RefreshAsync("subscription-seen");
+
+            result.Updated.Should().Be(1);
+            var updated = await store.GetAsync(proxy.Id);
+            updated.Should().NotBeNull();
+            updated!.LastSeenInSubscriptionAt.Should().NotBeNull();
+            updated.LatencyMs.Should().Be(37);
+            updated.AverageLatencyMs.Should().Be(45);
+            updated.AverageSpeedBytesPerSecond.Should().Be(12_345);
+            updated.CompositeScore.Should().Be(91.25);
+            updated.ProbeStatus.Should().Be("Healthy");
+            updated.ProbeError.Should().Be("retained diagnostic");
+            updated.Status.State.Should().Be(ResourceState.Active);
+            updated.Status.InFlight.Should().Be(2);
+            updated.Status.Version.Should().Be(7);
+        }
+        finally
+        {
+            try { if (File.Exists(path)) File.Delete(path); }
+            catch (IOException) { }
+        }
+    }
+
+    [TestMethod]
+    public async Task SeenAndConnectionWritesDoNotUndoConcurrentAdminState()
+    {
+        var directory = Path.Combine(AppContext.BaseDirectory, "test-data");
+        Directory.CreateDirectory(directory);
+        var path = Path.Combine(directory, $"router2api-{Guid.NewGuid():N}.db");
+        var database = new SqlSugarDatabase(
+            Options.Create(new DatabaseOptions { Path = path }),
+            NullLogger<SqlSugarDatabase>.Instance);
+        try
+        {
+            new DatabaseInitializer(database, NullLogger<DatabaseInitializer>.Instance).Initialize();
+            var store = new ProxyStore(database);
+            var seenProxy = new ProxyEndpoint
+            {
+                Id = "admin-disabled-seen",
+                SubscriptionId = "subscription-admin-race",
+                Host = "seen.proxy.test",
+                Port = 8001,
+                Status = new ResourceStatus { State = ResourceState.Draining }
+            };
+            var changedProxy = new ProxyEndpoint
+            {
+                Id = "admin-invalid-connection",
+                SubscriptionId = "subscription-admin-race",
+                Host = "old.proxy.test",
+                Port = 8002
+            };
+            await store.SaveAsync(seenProxy);
+            await store.SaveAsync(changedProxy);
+            var snapshot = await store.ListBySubscriptionAsync("subscription-admin-race");
+
+            seenProxy.Status.State = ResourceState.Disabled;
+            changedProxy.Status.State = ResourceState.Invalid;
+            await store.SaveAsync(seenProxy);
+            await store.SaveAsync(changedProxy);
+            await store.UpdateSubscriptionSeenBatchAsync([snapshot.Single(proxy => proxy.Id == seenProxy.Id)]);
+            await store.ReactivateDrainingBatchAsync([seenProxy.Id]);
+            var changed = snapshot.Single(proxy => proxy.Id == changedProxy.Id);
+            var connectionUpdate = new ProxyEndpoint
+            {
+                Id = changed.Id,
+                SubscriptionId = changed.SubscriptionId,
+                Host = "new.proxy.test",
+                Port = changed.Port,
+                ConfigurationVersion = changed.ConfigurationVersion + 1,
+                ProbeStatus = "Pending",
+                ProbeConfigurationVersion = changed.ConfigurationVersion + 1
+            };
+            await store.UpdateSubscriptionConnectionAsync(connectionUpdate, changed.ConfigurationVersion);
+
+            (await store.GetAsync(seenProxy.Id))!.Status.State.Should().Be(ResourceState.Disabled);
+            var current = await store.GetAsync(changedProxy.Id);
+            current!.Status.State.Should().Be(ResourceState.Invalid);
+            current.Host.Should().Be("new.proxy.test");
+        }
+        finally
+        {
+            try { if (File.Exists(path)) File.Delete(path); }
+            catch (IOException) { }
+        }
+    }
+
+    [TestMethod]
+    public async Task RefreshBatches101NodesAndOnlyReadsTheTargetSubscription()
+    {
+        var directory = Path.Combine(AppContext.BaseDirectory, "test-data");
+        Directory.CreateDirectory(directory);
+        var path = Path.Combine(directory, $"router2api-{Guid.NewGuid():N}.db");
+        var logger = new SqlCaptureLogger();
+        var database = new SqlSugarDatabase(
+            Options.Create(new DatabaseOptions { Path = path }),
+            logger);
+        try
+        {
+            new DatabaseInitializer(database, NullLogger<DatabaseInitializer>.Instance).Initialize();
+            var store = new ProxyStore(database);
+            await store.SaveAsync(new ProxyEndpoint
+            {
+                Id = "other-subscription-proxy",
+                SubscriptionId = "other-subscription",
+                Host = "other.proxy.test",
+                Port = 8000
+            });
+            var feed = string.Join(Environment.NewLine, Enumerable.Range(0, 101)
+                .Select(index => $"http://user:pass@proxy{index}.example.com:8080"));
+            var probe = new Mock<IProxyProbeService>();
+            probe.Setup(item => item.ProbeAsync(It.IsAny<ProxyEndpoint>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new ProxyProbeResult(true, 15, 20_000, "Healthy"));
+            using var service = new ProxySubscriptionService(
+                database, store, new StaticHttpClientFactory(feed), probe.Object);
+            await service.SaveAsync(new ProxySubscription
+            {
+                Id = "target-subscription",
+                Name = "target",
+                Url = "https://feed.test/proxies"
+            });
+
+            var beforeFirstRefresh = logger.Statements.Count;
+            var first = await service.RefreshAsync("target-subscription");
+            var firstSql = logger.Statements.Skip(beforeFirstRefresh).ToArray();
+
+            first.Added.Should().Be(101);
+            first.Updated.Should().Be(0);
+            first.Total.Should().Be(101);
+            firstSql.Count(statement => statement.Contains("proxy_endpoints", StringComparison.OrdinalIgnoreCase)
+                && statement.Contains("INSERT", StringComparison.OrdinalIgnoreCase)).Should().Be(2);
+
+            var beforeSecondRefresh = logger.Statements.Count;
+            var second = await service.RefreshAsync("target-subscription");
+            var secondSql = logger.Statements.Skip(beforeSecondRefresh).ToArray();
+
+            second.Added.Should().Be(0);
+            second.Updated.Should().Be(101);
+            second.Total.Should().Be(101);
+            var proxyReads = secondSql.Where(statement =>
+                statement.Contains("proxy_endpoints", StringComparison.OrdinalIgnoreCase)
+                && statement.Contains("SELECT", StringComparison.OrdinalIgnoreCase)).ToArray();
+            proxyReads.Should().ContainSingle();
+            proxyReads[0].Contains("SubscriptionId", StringComparison.OrdinalIgnoreCase).Should().BeTrue();
+            secondSql.Where(statement => statement.Contains("proxy_endpoints", StringComparison.OrdinalIgnoreCase))
+                .Should().NotContain(statement => statement.Contains("COUNT(", StringComparison.OrdinalIgnoreCase));
+
+            var proxies = await store.ListAsync();
+            proxies.Should().HaveCount(102);
+            proxies.Should().ContainSingle(proxy => proxy.SubscriptionId == "other-subscription"
+                && proxy.Id == "other-subscription-proxy");
+            proxies.Count(proxy => proxy.SubscriptionId == "target-subscription").Should().Be(101);
+        }
+        finally
+        {
+            try { if (File.Exists(path)) File.Delete(path); }
+            catch (IOException) { }
+        }
+    }
+
     private sealed class StaticHttpClientFactory(string body) : IHttpClientFactory
     {
         public HttpClient CreateClient(string name)

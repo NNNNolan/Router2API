@@ -10,11 +10,13 @@ public sealed class ModelMetadataWarmupHostedService(
     ILogger<ModelMetadataWarmupHostedService> logger) : BackgroundService
 {
     private static readonly TimeSpan RefreshInterval = TimeSpan.FromMinutes(30);
+    private static readonly TimeSpan FailureRetryInterval = TimeSpan.FromMinutes(1);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         while (!stoppingToken.IsCancellationRequested)
         {
+            var retryDelay = RefreshInterval;
             try
             {
                 var snapshot = await catalog.GetAsync(true, stoppingToken);
@@ -28,11 +30,11 @@ public sealed class ModelMetadataWarmupHostedService(
             }
             catch (Exception exception)
             {
-                // 模型元数据仅作辅助，可在下次定时或手动刷新时重试。
-                logger.LogWarning(exception, "model metadata warmup failed; a retry is scheduled");
+                retryDelay = FailureRetryInterval;
+                logger.LogWarning(exception, "model metadata warmup failed; retrying after {RetryDelay}", retryDelay);
             }
 
-            await Task.Delay(RefreshInterval, stoppingToken);
+            await Task.Delay(retryDelay, stoppingToken);
         }
     }
 }

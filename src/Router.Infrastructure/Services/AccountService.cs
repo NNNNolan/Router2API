@@ -80,6 +80,39 @@ public sealed class AccountService(
         return Task.FromResult(new PagedResult<Account>(items, page, pageSize, total));
     }
 
+    internal Task<IReadOnlyList<Account>> QueryCandidatesAsync(
+        string pluginKey,
+        string platform,
+        bool skipCooldown,
+        DateTimeOffset now,
+        int? page,
+        int pageSize,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        using var db = database.CreateClient();
+        var disabled = ResourceState.Disabled.ToString();
+        var invalid = ResourceState.Invalid.ToString();
+        var source = db.Queryable<AccountEntity>()
+            .Where(row => row.PluginKey == pluginKey && row.Platform == platform)
+            .Where(row => row.State != disabled && row.State != invalid);
+        if (!skipCooldown)
+        {
+            var active = ResourceState.Active.ToString();
+            var nowUtc = now.UtcDateTime;
+            source = source.Where(row => row.State == active
+                && (row.CooldownUntilUtc == null || row.CooldownUntilUtc <= nowUtc)
+                && (row.DisabledUntilUtc == null || row.DisabledUntilUtc <= nowUtc));
+        }
+
+        var rows = page is null
+            ? source.OrderBy(row => row.Id).ToList()
+            : source.OrderByDescending(row => row.UpdatedAtUtc)
+                .Skip((page.Value - 1) * pageSize).Take(pageSize).ToList();
+        var result = rows.Select(row => row.ToDomain()).ToArray();
+        return Task.FromResult<IReadOnlyList<Account>>(result);
+    }
+
     public async Task<Account> SaveAsync(Account account, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(account);

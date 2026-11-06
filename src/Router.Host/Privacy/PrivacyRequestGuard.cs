@@ -38,8 +38,20 @@ public sealed class PrivacyRequestGuard : IDisposable
     {
         if (request.OriginalBody is not { ValueKind: JsonValueKind.Object } body)
             return ApplyStandard(request, inspection);
-        var rewritten = Rewrite(body, inspection);
-        if (inspection.DryRun || inspection.Blocked || inspection.RestoreMap.Count == 0) return request;
+        if (inspection.DryRun || !inspection.CanRedact)
+        {
+            Scan(body, inspection.Inspect, RequestTextMode.Root);
+            return request;
+        }
+        var replacements = new Dictionary<string, string>(StringComparer.Ordinal);
+        Scan(body, text =>
+        {
+            var rewritten = inspection.Inspect(text);
+            if (!string.Equals(text, rewritten, StringComparison.Ordinal)) replacements.TryAdd(text, rewritten);
+            return rewritten;
+        }, RequestTextMode.Root);
+        if (inspection.Blocked || replacements.Count == 0) return request;
+        var rewritten = Write(body, text => replacements.GetValueOrDefault(text, text), RequestTextMode.Root);
         var endpoint = request.Endpoint switch
         {
             "/v1/completions" => TestEndpoint.Completions,
@@ -56,6 +68,57 @@ public sealed class PrivacyRequestGuard : IDisposable
     /// <summary>只改写协议文本。未修改的 JsonElement 直接 WriteTo，保留超大整数及未知字段。</summary>
     internal static JsonElement Rewrite(JsonElement body, PrivacyInspection inspection)
         => Write(body, inspection.Inspect, RequestTextMode.Root);
+
+    private static void Scan(JsonElement source, Func<string, string> inspect, RequestTextMode mode)
+    {
+        if (mode == RequestTextMode.None) return;
+        if (source.ValueKind == JsonValueKind.String)
+        {
+            if (mode != RequestTextMode.Descriptions) inspect(source.GetString()!);
+            return;
+        }
+        if (source.ValueKind == JsonValueKind.Array)
+        {
+            var childMode = ArrayChildMode(mode);
+            foreach (var child in source.EnumerateArray()) Scan(child, inspect, childMode);
+            return;
+        }
+        if (source.ValueKind != JsonValueKind.Object) return;
+        foreach (var property in source.EnumerateObject())
+        {
+            if (property.Name.Equals("arguments", StringComparison.OrdinalIgnoreCase)
+                && property.Value.ValueKind == JsonValueKind.String
+                && (mode == RequestTextMode.ToolFunction || OwnerIsFunctionCall(source, mode)))
+            {
+                ScanArguments(property.Value.GetString()!, inspect);
+                continue;
+            }
+            Scan(property.Value, inspect, ChildMode(source, property.Name, mode));
+        }
+    }
+
+    private static void ScanArguments(string text, Func<string, string> inspect)
+    {
+        try
+        {
+            using var document = JsonDocument.Parse(text);
+            Scan(document.RootElement, inspect, RequestTextMode.AllValues);
+        }
+        catch (JsonException) { inspect(text); }
+    }
+
+    private static bool OwnerIsFunctionCall(JsonElement owner, RequestTextMode parentMode)
+        => parentMode is RequestTextMode.Message or RequestTextMode.Part
+            && owner.TryGetProperty("type", out var type) && type.ValueKind == JsonValueKind.String
+            && type.GetString() == "function_call";
+
+    private static RequestTextMode ArrayChildMode(RequestTextMode mode) => mode switch
+    {
+        RequestTextMode.Messages => RequestTextMode.Message,
+        RequestTextMode.Content => RequestTextMode.Part,
+        RequestTextMode.Tools => RequestTextMode.Tool,
+        _ => mode
+    };
 
     private enum RequestTextMode { None, Root, Messages, Message, Content, Part, Tools, Tool, ToolFunction, AllValues, Descriptions }
 
@@ -79,13 +142,7 @@ public sealed class PrivacyRequestGuard : IDisposable
         if (value.ValueKind == JsonValueKind.Array)
         {
             writer.WriteStartArray();
-            var childMode = mode switch
-            {
-                RequestTextMode.Messages => RequestTextMode.Message,
-                RequestTextMode.Content => RequestTextMode.Part,
-                RequestTextMode.Tools => RequestTextMode.Tool,
-                _ => mode
-            };
+            var childMode = ArrayChildMode(mode);
             foreach (var child in value.EnumerateArray()) WriteValue(writer, child, transform, childMode);
             writer.WriteEndArray();
             return;
@@ -106,10 +163,6 @@ public sealed class PrivacyRequestGuard : IDisposable
         }
         writer.WriteEndObject();
 
-        static bool OwnerIsFunctionCall(JsonElement owner, RequestTextMode parentMode)
-            => parentMode is RequestTextMode.Message or RequestTextMode.Part
-                && owner.TryGetProperty("type", out var type) && type.ValueKind == JsonValueKind.String
-                && type.GetString() == "function_call";
     }
 
     private static RequestTextMode ChildMode(JsonElement owner, string name, RequestTextMode mode)
@@ -179,25 +232,56 @@ public sealed class PrivacyRequestGuard : IDisposable
 
     private static AdapterRequest ApplyStandard(AdapterRequest request, PrivacyInspection inspection)
     {
+        var replacements = new Dictionary<string, string>(StringComparer.Ordinal);
+        ScanStandard(request, text =>
+        {
+            var rewritten = inspection.Inspect(text);
+            if (!string.Equals(text, rewritten, StringComparison.Ordinal)) replacements.TryAdd(text, rewritten);
+            return rewritten;
+        });
+        if (inspection.DryRun || inspection.Blocked || replacements.Count == 0) return request;
+        string RewriteText(string text) => replacements.GetValueOrDefault(text, text);
+
         var result = ModelMappingRequest.Create(request, request.Model);
         result.Messages = request.Messages.Select(message => message with
         {
-            Content = inspection.Inspect(message.Content),
+            Content = RewriteText(message.Content),
             ContentParts = message.ContentParts?.Select(part => part.Kind == AdapterContentPartKind.Text
-                ? part with { Text = part.Text is { } text ? inspection.Inspect(text) : null } : part).ToArray(),
+                ? part with { Text = part.Text is { } text ? RewriteText(text) : null } : part).ToArray(),
             ReasoningContent = message.ReasoningContent is { } reasoning
-                ? Write(reasoning, inspection.Inspect, RequestTextMode.AllValues) : null,
+                ? Write(reasoning, RewriteText, RequestTextMode.AllValues) : null,
             Reasoning = message.Reasoning is { } thinking
-                ? Write(thinking, inspection.Inspect, RequestTextMode.AllValues) : null,
+                ? Write(thinking, RewriteText, RequestTextMode.AllValues) : null,
             ToolCalls = message.ToolCalls?.Select(call => (object)Write(JsonSerializer.SerializeToElement(call),
-                inspection.Inspect, RequestTextMode.Tool)).ToArray()
+                RewriteText, RequestTextMode.Tool)).ToArray()
         }).ToArray();
         result.Tools = request.Tools.Select(tool => (object)Write(JsonSerializer.SerializeToElement(tool),
-            inspection.Inspect, RequestTextMode.Tool)).ToArray();
+            RewriteText, RequestTextMode.Tool)).ToArray();
         foreach (var key in new[] { "prompt", "instructions", "system", "input" })
             if (request.Extensions.TryGetValue(key, out var value))
-                result.Extensions[key] = Write(JsonSerializer.SerializeToElement(value), inspection.Inspect, RequestTextMode.Content);
-        return inspection.DryRun || inspection.Blocked ? request : result;
+                result.Extensions[key] = Write(JsonSerializer.SerializeToElement(value), RewriteText, RequestTextMode.Content);
+        return result;
+    }
+
+    private static void ScanStandard(AdapterRequest request, Func<string, string> inspect)
+    {
+        foreach (var message in request.Messages)
+        {
+            inspect(message.Content);
+            if (message.ContentParts is not null)
+                foreach (var part in message.ContentParts)
+                    if (part.Kind == AdapterContentPartKind.Text && part.Text is { } text) inspect(text);
+            if (message.ReasoningContent is { } reasoning) Scan(reasoning, inspect, RequestTextMode.AllValues);
+            if (message.Reasoning is { } thinking) Scan(thinking, inspect, RequestTextMode.AllValues);
+            if (message.ToolCalls is not null)
+                foreach (var call in message.ToolCalls)
+                    Scan(JsonSerializer.SerializeToElement(call), inspect, RequestTextMode.Tool);
+        }
+        foreach (var tool in request.Tools)
+            Scan(JsonSerializer.SerializeToElement(tool), inspect, RequestTextMode.Tool);
+        foreach (var key in new[] { "prompt", "instructions", "system", "input" })
+            if (request.Extensions.TryGetValue(key, out var value))
+                Scan(JsonSerializer.SerializeToElement(value), inspect, RequestTextMode.Content);
     }
 
     public void Dispose() => _subscription?.Dispose();

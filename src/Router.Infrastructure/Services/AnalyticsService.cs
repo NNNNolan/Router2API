@@ -35,9 +35,18 @@ public sealed class AnalyticsService(SqlSugarDatabase database) : IAnalyticsServ
         if (!string.IsNullOrWhiteSpace(query.Platform)) source = source.Where(item => item.Platform == query.Platform);
         if (!string.IsNullOrWhiteSpace(query.Model)) source = source.Where(item => item.Model == query.Model);
 
-        var rows = source.ToList().Select(row => new UsageRow(row,
-            row.UsageJson is null ? null : JsonSerializer.Deserialize<Usage>(row.UsageJson),
-            row.UsageMetadataJson is null ? null : JsonSerializer.Deserialize<UsageMetadata>(row.UsageMetadataJson))).ToArray();
+        var rows = source.Select(row => new AnalyticsLogRow
+            {
+                CreatedAtUtc = row.CreatedAtUtc,
+                Platform = row.Platform,
+                Model = row.Model,
+                Success = row.Success,
+                DurationMs = row.DurationMs,
+                UsageJson = row.UsageJson,
+                UsageMetadataJson = row.UsageMetadataJson
+            }).ToList().Select(row => new UsageRow(row,
+                row.UsageJson is null ? null : JsonSerializer.Deserialize<Usage>(row.UsageJson),
+                row.UsageMetadataJson is null ? null : JsonSerializer.Deserialize<UsageMetadata>(row.UsageMetadataJson))).ToArray();
         var byPlatform = rows.Where(row => !string.IsNullOrWhiteSpace(row.Log.Platform))
             .GroupBy(row => row.Log.Platform!, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => (long)group.Count(), StringComparer.OrdinalIgnoreCase);
@@ -108,7 +117,19 @@ public sealed class AnalyticsService(SqlSugarDatabase database) : IAnalyticsServ
         return ordered[index];
     }
 
-    private sealed record UsageRow(RequestLogEntity Log, Usage? Usage, UsageMetadata? Metadata);
+    private sealed class AnalyticsLogRow
+    {
+        public AnalyticsLogRow() { }
+        public DateTime CreatedAtUtc { get; set; }
+        public string? Platform { get; set; }
+        public string? Model { get; set; }
+        public bool Success { get; set; }
+        public int DurationMs { get; set; }
+        public string? UsageJson { get; set; }
+        public string? UsageMetadataJson { get; set; }
+    }
+
+    private sealed record UsageRow(AnalyticsLogRow Log, Usage? Usage, UsageMetadata? Metadata);
 }
 
 /// <summary>管理端输入输出用量时间桶。</summary>

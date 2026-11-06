@@ -510,18 +510,23 @@ public sealed class PluginAttemptExecutor(
         // 优先级和权重应覆盖插件平台的全部账号，不能只考虑第一页可用账号。
         if (accountPolicy.PreferredExpirySelector is not null || accountPolicy.WeightSelector is not null || accountPolicy.BatchSelector is not null)
         {
-            var all = await accounts.ListAsync(pluginKey, platformName, cancellationToken);
+            var all = accounts is AccountService store
+                ? await store.QueryCandidatesAsync(pluginKey, platformName, overrides?.SkipCooldown == true,
+                    DateTimeOffset.UtcNow, null, 0, cancellationToken)
+                : await accounts.ListAsync(pluginKey, platformName, cancellationToken);
             return await FilterAccountsAsync(pluginKey, platformName, all, request, overrides, accountPolicy, cancellationToken);
         }
 
         const int pageSize = 100;
         for (var page = 1; page <= 10; page++)
         {
-            var batch = await accounts.QueryAsync(
-                new AccountQuery(pluginKey, platformName, Page: page, PageSize: pageSize),
-                cancellationToken);
-            var result = await FilterAccountsAsync(pluginKey, platformName, batch.Items, request, overrides, accountPolicy, cancellationToken);
-            if (result.Count > 0 || batch.Items.Count < pageSize)
+            var candidates = accounts is AccountService store
+                ? await store.QueryCandidatesAsync(pluginKey, platformName, overrides?.SkipCooldown == true,
+                    DateTimeOffset.UtcNow, page, pageSize, cancellationToken)
+                : (await accounts.QueryAsync(
+                    new AccountQuery(pluginKey, platformName, Page: page, PageSize: pageSize), cancellationToken)).Items;
+            var result = await FilterAccountsAsync(pluginKey, platformName, candidates, request, overrides, accountPolicy, cancellationToken);
+            if (result.Count > 0 || candidates.Count < pageSize)
                 return result;
         }
 
@@ -548,17 +553,19 @@ public sealed class PluginAttemptExecutor(
         if (candidates.Length == 0) return candidates;
         if (overrides?.SkipCooldown != true)
         {
-            // 先完成原生硬性过滤，再将候选账号交给脚本。
-            var available = await Task.WhenAll(candidates.Select(async present =>
+            IReadOnlyList<DateTimeOffset?> available;
+            try
             {
-                try
-                {
-                    var fastCooldown = await shortTermState.GetExpiryAsync(AccountService.AccountCooldownKey(pluginKey, present.Id), cancellationToken);
-                    return fastCooldown is null || fastCooldown <= now ? present : null;
-                }
-                catch when (!cancellationToken.IsCancellationRequested) { return present; }
-            }));
-            candidates = available.OfType<Account>().ToArray();
+                available = shortTermState is RedisKeyValueStore redisState
+                    ? await redisState.GetExpiryBatchAsync(
+                        candidates.Select(present => AccountService.AccountCooldownKey(pluginKey, present.Id)).ToArray(), cancellationToken)
+                    : await GetExpiriesBoundedAsync(candidates, pluginKey, cancellationToken);
+            }
+            catch when (!cancellationToken.IsCancellationRequested)
+            {
+                available = Enumerable.Repeat<DateTimeOffset?>(null, candidates.Length).ToArray();
+            }
+            candidates = candidates.Where((_, index) => available[index] is null || available[index] <= now).ToArray();
         }
 
         if (policy.BatchSelector is not null && candidates.Length > 0)
@@ -599,17 +606,55 @@ public sealed class PluginAttemptExecutor(
             return candidates;
 
         var now = DateTimeOffset.UtcNow;
-        // 各代理的 Redis 冷却查询互不依赖，应并行执行，避免逐个串行查询 HGETALL。
-        var available = await Task.WhenAll(candidates.Select(async proxy =>
+        var states = proxyPolicy is RedisProxyPolicyStore redisPolicy
+            ? await redisPolicy.GetManyAsync(pluginKey, candidates, cancellationToken)
+            : await GetProxyPoliciesBoundedAsync(pluginKey, candidates, cancellationToken);
+        return candidates.Where((_, index) =>
         {
-            // Redis 查询错误在此直接向上传播，节点状态不回退到内存。
-            var state = await proxyPolicy.GetAsync(pluginKey, proxy, cancellationToken);
-            return state?.State == ProxyPolicyState.Cooldown && state.CooldownUntil > now
-                ? null
-                : proxy;
-        }));
+            var state = states[index];
+            return state?.State != ProxyPolicyState.Cooldown
+                || state.CooldownUntil is not { } until
+                || until <= now;
+        }).ToArray();
+    }
 
-        return available.Where(static proxy => proxy is not null).Select(static proxy => proxy!).ToArray();
+    private async Task<DateTimeOffset?[]> GetExpiriesBoundedAsync(
+        Account[] candidates,
+        string pluginKey,
+        CancellationToken cancellationToken)
+    {
+        var expiries = new DateTimeOffset?[candidates.Length];
+        for (var start = 0; start < candidates.Length; start += 16)
+        {
+            var count = Math.Min(16, candidates.Length - start);
+            var batch = await Task.WhenAll(Enumerable.Range(start, count).Select(async index =>
+            {
+                try
+                {
+                    return await shortTermState.GetExpiryAsync(
+                        AccountService.AccountCooldownKey(pluginKey, candidates[index].Id), cancellationToken);
+                }
+                catch when (!cancellationToken.IsCancellationRequested) { return null; }
+            }));
+            Array.Copy(batch, 0, expiries, start, count);
+        }
+        return expiries;
+    }
+
+    private async Task<ProxyPolicySnapshot?[]> GetProxyPoliciesBoundedAsync(
+        string pluginKey,
+        ProxyEndpoint[] candidates,
+        CancellationToken cancellationToken)
+    {
+        var states = new ProxyPolicySnapshot?[candidates.Length];
+        for (var start = 0; start < candidates.Length; start += 16)
+        {
+            var count = Math.Min(16, candidates.Length - start);
+            var batch = await Task.WhenAll(Enumerable.Range(start, count).Select(index =>
+                proxyPolicy.GetAsync(pluginKey, candidates[index], cancellationToken)));
+            Array.Copy(batch, 0, states, start, count);
+        }
+        return states;
     }
 
     private static ProxyEndpoint? SelectProxy(IReadOnlyList<ProxyEndpoint> proxies, string? forcedId)

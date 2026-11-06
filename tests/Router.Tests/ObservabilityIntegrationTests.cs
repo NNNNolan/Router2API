@@ -34,7 +34,7 @@ public sealed class ObservabilityIntegrationTests
     {
         await using var host = await Host.Create();
         using var client = host.App.GetTestClient();
-        foreach (var path in new[] { "/api/admin/privacy/settings", "/api/admin/privacy/events", "/api/admin/traces/topology", "/api/admin/traces/requests", "/api/admin/dashboard/activity-heatmap" })
+        foreach (var path in new[] { "/api/admin/privacy/settings", "/api/admin/privacy/events", "/api/admin/traces/topology", "/api/admin/traces/requests" })
             (await client.GetAsync(path)).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
         await host.Login(client);
         using var untrusted = await client.PutAsJsonAsync("/api/admin/privacy/settings", PrivacyGuardTests.Settings("redact"));
@@ -90,10 +90,6 @@ public sealed class ObservabilityIntegrationTests
         var topology = await client.GetFromJsonAsync<TraceTopology>("/api/admin/traces/topology");
         topology!.Links.Should().HaveCount(4);
         topology.Links.Should().OnlyContain(link => link.PluginKey == "demo" && link.Attempts == 1);
-        var heatmap = await client.GetFromJsonAsync<ActivityHeatmapReport>("/api/admin/dashboard/activity-heatmap?timezone=Asia%2FShanghai");
-        heatmap!.Requests.Should().Be(5);
-        heatmap.Days.Should().HaveCount(365);
-        (await client.GetAsync("/api/admin/dashboard/activity-heatmap?timezone=invalid")).StatusCode.Should().Be(HttpStatusCode.BadRequest);
         (await client.GetAsync("/api/admin/traces/requests?fromUtc=not-a-date")).StatusCode.Should().Be(HttpStatusCode.BadRequest);
         (await client.GetAsync("/api/admin/traces/requests?pageSize=100000")).StatusCode.Should().Be(HttpStatusCode.BadRequest);
         using var test = await client.PostAsJsonAsync("/api/admin/privacy/test", new { text = "person@example.com" });

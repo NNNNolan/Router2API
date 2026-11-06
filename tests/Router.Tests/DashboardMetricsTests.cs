@@ -69,6 +69,49 @@ public sealed class DashboardMetricsTests
         result.Should().BeEquivalentTo(new DashboardMetrics(0, 0, 0, 0, 0, 0, 3, []));
     }
 
+    [TestMethod]
+    public async Task HistorySnapshotDoesNotFreezeRecentCountsOrActiveRequests()
+    {
+        var database = Database();
+        var logs = new RequestLogStore(database);
+        var now = DateTimeOffset.UtcNow;
+        var dayStart = new DateTimeOffset(now.UtcDateTime.Date, TimeSpan.Zero);
+        var clock = new TestTimeProvider(now);
+        var service = new DashboardMetricsService(database, clock);
+        await Write(logs, "a", now.AddMinutes(-2), true, 100);
+        var first = await service.QueryAsync(dayStart, dayStart.AddDays(1), now, 1);
+        await Write(logs, "a", now.AddSeconds(-30), false, 200);
+
+        var refreshed = await service.QueryAsync(dayStart, dayStart.AddDays(1), now, 7);
+
+        refreshed.TotalRequests.Should().Be(first.TotalRequests);
+        refreshed.RequestsToday.Should().Be(2);
+        refreshed.RequestsPerMinute.Should().Be(1);
+        refreshed.ActiveRequests.Should().Be(7);
+
+        clock.Advance(TimeSpan.FromSeconds(16));
+        var expired = await service.QueryAsync(dayStart, dayStart.AddDays(1), now, 8);
+        expired.TotalRequests.Should().Be(2);
+        expired.ActiveRequests.Should().Be(8);
+    }
+
+    [TestMethod]
+    public async Task RecentRpmRangeExtendsPastProvidedDayEnd()
+    {
+        var database = Database();
+        var logs = new RequestLogStore(database);
+        var now = DateTimeOffset.UtcNow;
+        var dayStart = new DateTimeOffset(now.UtcDateTime.Date.AddDays(-1), TimeSpan.Zero);
+        var dayEnd = dayStart.AddDays(1);
+        await Write(logs, "a", dayStart.AddHours(2), true, 100);
+        await Write(logs, "a", now.AddSeconds(-30), true, 200);
+
+        var result = await new DashboardMetricsService(database).QueryAsync(dayStart, dayEnd, now, 0);
+
+        result.RequestsToday.Should().Be(1);
+        result.RequestsPerMinute.Should().Be(1);
+    }
+
     private static SqlSugarDatabase Database()
     {
         var path = Path.Combine(AppContext.BaseDirectory, "test-data", $"dashboard-{Guid.NewGuid():N}.db");
@@ -80,4 +123,11 @@ public sealed class DashboardMetricsTests
     private static Task Write(RequestLogStore store, string? platform, DateTimeOffset at, bool success, int durationMs)
         => store.WriteAsync(new RequestLog { TraceId = Guid.NewGuid().ToString("N"), Platform = platform,
             Model = "model", CreatedAt = at, Success = success, StatusCode = success ? 200 : 503, DurationMs = durationMs });
+
+    private sealed class TestTimeProvider(DateTimeOffset now) : TimeProvider
+    {
+        private DateTimeOffset _now = now;
+        public override DateTimeOffset GetUtcNow() => _now;
+        public void Advance(TimeSpan duration) => _now += duration;
+    }
 }

@@ -89,6 +89,40 @@ public sealed class ModelCatalogTests
     }
 
     [TestMethod]
+    public async Task QueuedOrdinaryQueriesReuseResultPublishedBeforeTerminalGateRelease()
+    {
+        using var transport = new ProxyTransportFactory();
+        var registry = new PlatformRegistry();
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var terminal = new Mock<IPlatformTerminal>();
+        var calls = 0;
+        terminal.Setup(value => value.GetModelsAsync(It.IsAny<ModelQueryContext>(), It.IsAny<CancellationToken>()))
+            .Returns(async (ModelQueryContext _, CancellationToken _) =>
+            {
+                Interlocked.Increment(ref calls);
+                entered.TrySetResult();
+                await release.Task;
+                return [new ModelDescriptor("model", "Model")];
+            });
+        registry.Register(new("provider", "provider", "Provider", terminal.Object)
+        {
+            ModelCacheTtl = TimeSpan.FromMinutes(1)
+        });
+        var catalog = new ModelCatalog(registry, transport);
+
+        var first = catalog.ListAsync("provider");
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var queued = catalog.ListAsync("provider");
+        release.TrySetResult();
+
+        var results = await Task.WhenAll(first, queued);
+        results[0].Single().Id.Should().Be("model");
+        results[1].Single().Id.Should().Be("model");
+        calls.Should().Be(1);
+    }
+
+    [TestMethod]
     public async Task EachPluginHasA45SecondBudgetEvenWhenItIgnoresCancellation()
     {
         using var transport = new ProxyTransportFactory();

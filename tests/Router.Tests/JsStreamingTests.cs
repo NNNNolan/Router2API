@@ -6,6 +6,7 @@ using Moq;
 using Router.Contracts.Domain;
 using Router.Contracts.Host;
 using Router.Host.Plugins.JavaScript;
+using Router.Infrastructure.Services;
 
 namespace Router.Tests;
 
@@ -35,6 +36,20 @@ public sealed class JsStreamingTests
         // 包含完整标准数据块在 Jint 中的 JSON.parse 和 JSON.stringify 开销；
         // 这是当前夹具的分配回归上限，不代表零分配。
         perFrame.Should().BeLessThanOrEqualTo(36 * 1024);
+    }
+
+    [TestMethod]
+    public async Task InvocationTraceSeparatesSlotWaitFromInitialization()
+    {
+        using var trace = new RequestTrace("/v1/chat/completions");
+        using var terminal = Terminal(() => new ByteArrayContent(Encoding.UTF8.GetBytes(Sample())));
+
+        await terminal.InvokeAsync(Context(streaming: false));
+
+        var stages = trace.Complete().Stages;
+        var wait = stages.Single(stage => stage.Name == "js.slot.wait");
+        var initialize = stages.Single(stage => stage.Name == "js.invocation.initialize");
+        (wait.StartMs + wait.DurationMs).Should().BeLessThanOrEqualTo(initialize.StartMs + 0.1);
     }
 
     [TestMethod]

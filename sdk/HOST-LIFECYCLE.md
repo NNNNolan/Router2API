@@ -94,6 +94,8 @@ Jint loader 为每个声明平台构建终端，`hooks/policy` 可被平台级�
 
 模型广场手动刷新直接合并本轮刷新结果，不再立即重新查询一次所有插件。超时结果不写入缓存；忽略取消的原生插件仍由 `TrackedTerminal` 跟踪到真实退出，超时不代表已强制终止插件。同一终端最多一个真实模型查询在途；阻塞发生在返回 Task 之前时也不会堵住调用方线程，超时后的客户端仍由实际查询持有到退出。45 秒针对单次插件模型查询，不是整个模型广场 HTTP 请求的总预算；JS handler 仍受自己的阶段预算约束，models.dev 能力补全仍使用独立流程。
 
+声明正缓存 TTL 的终端在普通查询排队后会再次检查当前缓存，成功结果在释放执行权前发布，供排队读取复用。强制刷新、零 TTL 和插件代际失效保留原有边界。
+
 ## 4. 一次模型调用
 
 源码：[API 入口](../src/Router.Host/Api/ApiEndpoints.cs)、[RouterPipeline](../src/Router.Host/Pipeline/RouterPipeline.cs)、[执行器](../src/Router.Infrastructure/Services/PluginProxyRuntime.cs)。
@@ -117,11 +119,13 @@ flowchart TD
 ### 4.1 路由和策略快照
 
 1. 常规模型为 `platform/model`，宿主剥离平台前缀后交给终端。若只启用一个平台，当前路由器也有无前缀回退。
-2. 可选 reasoning 元数据约束在进入尝试前处理；不是“输出太长就自动降档再重试”。
+2. 可选 reasoning 元数据约束在进入尝试前读取当前内存快照，不等待外部目录或 Redis；后台预热与管理刷新负责更新公共能力目录。未取得快照时按辅助元数据不可用处理，刷新故障仍记录日志。
 3. 读取平台策略快照，随后每次尝试使用这份策略，不在半途中突然换成新版本的委托。
 4. 创建 `PluginInvocationScope` 和 Polly `ResilienceContext`，把当前预算放入调用上下文，而非共享 pipeline 闭包。
 
 宿主配置的模型映射优先于单平台无前缀回退，`平台/模型` 显式路由继续可用。`ModelMappingStore` 从 SQLite 读取一条不可变请求快照，`RouterPipeline` 按数组顺序调用已启用且归属匹配的目标；每个目标独立复制请求并只改写原始 JSON 的顶层 `model`。映射停用时返回 404，没有可用目标时返回 503。
+
+别名格式校验在共享查找入口执行；包含 `/` 等不可能是合法别名的模型 ID 直接进入常规路由，省去必然未命中的别名查询。
 
 `ModelMappingHealth` 按映射 ID、插件、平台、模型维护宿主进程内状态。目标配置 `FailureThreshold` 与 `CooldownSeconds`（非负整数，缺省为 3 与 300），任一为零就不自动冷却。每个目标的一轮调用（含内部重试）失败计一次，成功清零；400/413/415/422 与调用方取消不计数。达到该目标的失败阈值后暂停设定秒数，冷却目标写入跳过明细，到期重新参与顺序路由。流通过 `PluginResponseLifetime.OnCompleted` 结算，返回 HTTP 200 不提前清零；冷却前尚未完成的结果不会延长冷却或污染到期后的新周期。编辑移除目标、改变其冷却规则或删除映射会清理状态，旧在途结果不影响新规则；改名、调整顺序保留状态，宿主重启后状态清空。
 
@@ -227,6 +231,8 @@ AdapterResponse.Lifetime
 ```
 
 writer 的 finally 和 HTTP OnCompleted 提供回收兜底。未被枚举的流、提前终止、客户端断开和最后标记写出失败，都不应算完整成功。消费端只读前几帧就退出时也必须释放枚举器/lifetime。
+
+完成点继续写入请求日志并结算用量，宿主不再重复写旧用量聚合表。`DurationMs` 和追踪完成点保持既有口径；用量结算、必要日志写入的额外耗时分别记录 Debug 诊断日志。JS 请求阶段增加 `js.slot.wait` 与 `js.invocation.initialize`，分别观测排队和引擎初始化；引擎配额、流所有权及热重载 drain 不变。
 
 标准流异常可映射为协议错误增量；raw 是不透明字节，不能随便往里面插入 JSON/SSE。单条流只允许消费一次。
 

@@ -67,6 +67,51 @@ public sealed class RedisKeyValueStore : ISharedKeyValueStore, IDisposable
         };
     }
 
+    internal async Task<IReadOnlyList<DateTimeOffset?>> GetExpiryBatchAsync(
+        string[] keys,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        const int batchSize = 64;
+        var expiries = new DateTimeOffset?[keys.Length];
+        var client = RequireClient();
+        for (var start = 0; start < keys.Length; start += batchSize)
+        {
+            // CSRedis pipeline 是同步 API；每批限 64 个命令，取消在批次前后检查，执行中无法中断。
+            cancellationToken.ThrowIfCancellationRequested();
+            var count = Math.Min(batchSize, keys.Length - start);
+            object[] results;
+            try
+            {
+                results = client.StartPipe(pipe =>
+                {
+                    for (var index = start; index < start + count; index++)
+                        pipe.PTtl(Key(keys[index]));
+                });
+            }
+            catch (RedisException exception) when (RedisKeyValueStore.IsRedirect(exception))
+            {
+                for (var offset = 0; offset < count; offset += 16)
+                {
+                    var fallbackCount = Math.Min(16, count - offset);
+                    var fallback = await Task.WhenAll(Enumerable.Range(offset, fallbackCount).Select(index =>
+                        GetExpiryAsync(keys[start + index], cancellationToken)));
+                    Array.Copy(fallback, 0, expiries, start + offset, fallbackCount);
+                }
+                cancellationToken.ThrowIfCancellationRequested();
+                continue;
+            }
+            for (var offset = 0; offset < count; offset++)
+            {
+                var ttl = Convert.ToInt64(results[offset], System.Globalization.CultureInfo.InvariantCulture);
+                expiries[start + offset] = ttl > 0 ? DateTimeOffset.UtcNow.AddMilliseconds(ttl) : null;
+            }
+            cancellationToken.ThrowIfCancellationRequested();
+        }
+
+        return expiries;
+    }
+
     public async Task<bool> SetExpiryAsync(string key, TimeSpan ttl, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -153,6 +198,13 @@ public sealed class RedisKeyValueStore : ISharedKeyValueStore, IDisposable
 
     internal string Key(string key) => $"{_prefix}{key}";
 
+    internal static bool IsRedirect(RedisException exception)
+    {
+        var message = exception.Message.AsSpan().TrimStart();
+        return message.StartsWith("MOVED ", StringComparison.OrdinalIgnoreCase)
+            || message.StartsWith("ASK ", StringComparison.OrdinalIgnoreCase);
+    }
+
     public void Dispose() => _client?.Dispose();
 }
 
@@ -187,9 +239,56 @@ public sealed class RedisProxyPolicyStore(RedisKeyValueStore redis) : IProxyPoli
         cancellationToken.ThrowIfCancellationRequested();
         var fields = await redis.RequireClient().HGetAllAsync(
             redis.Key(Key(pluginKey, proxy)));
+        return Parse(fields);
+    }
+
+    internal async Task<IReadOnlyList<ProxyPolicySnapshot?>> GetManyAsync(
+        string pluginKey,
+        ProxyEndpoint[] proxies,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        const int batchSize = 64;
+        var states = new ProxyPolicySnapshot?[proxies.Length];
+        var client = redis.RequireClient();
+        for (var start = 0; start < proxies.Length; start += batchSize)
+        {
+            // 保留每个 hash 的完整字段解析与校验；同步 pipeline 按小批提交。
+            cancellationToken.ThrowIfCancellationRequested();
+            var count = Math.Min(batchSize, proxies.Length - start);
+            object[] fields;
+            try
+            {
+                fields = client.StartPipe(pipe =>
+                {
+                    for (var index = start; index < start + count; index++)
+                        pipe.HGetAll(redis.Key(Key(pluginKey, proxies[index])));
+                });
+            }
+            catch (RedisException exception) when (RedisKeyValueStore.IsRedirect(exception))
+            {
+                for (var offset = 0; offset < count; offset += 16)
+                {
+                    var fallbackCount = Math.Min(16, count - offset);
+                    var fallback = await Task.WhenAll(Enumerable.Range(offset, fallbackCount).Select(index =>
+                        GetAsync(pluginKey, proxies[start + index], cancellationToken)));
+                    Array.Copy(fallback, 0, states, start + offset, fallbackCount);
+                }
+                cancellationToken.ThrowIfCancellationRequested();
+                continue;
+            }
+            for (var offset = 0; offset < count; offset++)
+                states[start + offset] = Parse((Dictionary<string, string>)fields[offset]);
+            cancellationToken.ThrowIfCancellationRequested();
+        }
+
+        return states;
+    }
+
+    private static ProxyPolicySnapshot Parse(Dictionary<string, string> fields)
+    {
         if (fields.Count == 0)
             return new ProxyPolicySnapshot(ProxyPolicyState.Available, null, 0, null, null, null);
-
         if (!Enum.TryParse<ProxyPolicyState>(Get(fields, "state"), out var state)
             || !long.TryParse(Get(fields, "cooldownUntil"), out var cooldownMilliseconds)
             || !int.TryParse(Get(fields, "failureCount"), out var failureCount)

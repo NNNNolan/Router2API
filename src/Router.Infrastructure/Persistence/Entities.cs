@@ -30,6 +30,8 @@ public sealed class PluginHttpOriginEntity
 }
 
 [SugarTable("accounts")]
+[SugarIndex("ix_accounts_plugin_platform_state_updated", nameof(PluginKey), OrderByType.Asc,
+    nameof(Platform), OrderByType.Asc, nameof(State), OrderByType.Asc, nameof(UpdatedAtUtc), OrderByType.Desc)]
 public sealed class AccountEntity
 {
     [SugarColumn(IsPrimaryKey = true, Length = 64)]
@@ -112,6 +114,7 @@ public sealed class ProxySubscriptionEntity
 }
 
 [SugarTable("proxy_endpoints")]
+[SugarIndex("ix_proxy_endpoints_subscription", nameof(SubscriptionId), OrderByType.Asc)]
 public sealed class ProxyEndpointEntity
 {
     [SugarColumn(IsPrimaryKey = true, Length = 64)]

@@ -40,7 +40,7 @@ public sealed class ModelMetadataCatalog(
             if (cached is not null && (previous is null || cached.UpdatedAt > previous.UpdatedAt))
                 previous = cached;
             if (previous is not null)
-                _memory = previous;
+                Volatile.Write(ref _memory, previous);
 
             if (!forceRefresh && IsFresh(previous))
                 return previous!;
@@ -49,7 +49,7 @@ public sealed class ModelMetadataCatalog(
             {
                 var snapshot = await FetchAsync(cancellationToken);
 
-                _memory = snapshot;
+                Volatile.Write(ref _memory, snapshot);
                 await WriteCacheAsync(snapshot, cancellationToken);
                 return snapshot;
             }
@@ -70,17 +70,20 @@ public sealed class ModelMetadataCatalog(
         }
     }
 
-    public async Task<ModelMetadata?> FindAsync(
+    public Task<ModelMetadata?> FindAsync(
         string platform,
         string model,
         CancellationToken cancellationToken = default)
     {
-        var snapshot = await GetAsync(false, cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+        var snapshot = Volatile.Read(ref _memory);
+        if (snapshot is null) return Task.FromResult<ModelMetadata?>(null);
         var fullId = $"{platform.Trim()}/{model.Trim()}";
-        return snapshot.Models.FirstOrDefault(item =>
-                   item.Id.Equals(fullId, StringComparison.OrdinalIgnoreCase))
+        var metadata = snapshot.Models.FirstOrDefault(item =>
+                           item.Id.Equals(fullId, StringComparison.OrdinalIgnoreCase))
             ?? snapshot.Models.FirstOrDefault(item =>
                 item.Id.EndsWith('/' + model.Trim(), StringComparison.OrdinalIgnoreCase));
+        return Task.FromResult(metadata);
     }
 
     private async Task<ModelMetadataSnapshot?> ReadCacheAsync(CancellationToken cancellationToken)

@@ -21,8 +21,6 @@ export interface ModelMappingTarget { pluginKey: string; platform: string; model
 export interface ModelMapping { id: string; name: string; enabled: boolean; targets: ModelMappingTarget[] }
 
 export interface PageResult<T> { items: T[]; page: number; pageSize: number; total: number; totalPages: number }
-export interface ActivityHeatmapDay { day: string; requests: number }
-export interface ActivityHeatmapReport { fromDay: string; toDay: string; timezone: string; retentionDays: number; earliestLogUtc: string | null; days: ActivityHeatmapDay[]; requests: number; activeDays: number }
 export type PrivacyAction = 'off' | 'warn' | 'block' | 'redact'
 export interface PrivacyCustomRule { id: string; name: string; pattern: string; enabled: boolean; action: PrivacyAction | null }
 export interface PrivacySettings { enabled: boolean; dryRun: boolean; defaultAction: PrivacyAction; categoryActions: Record<string, PrivacyAction>; customRules: PrivacyCustomRule[] }
@@ -237,7 +235,6 @@ export async function request<T>(path: string, init: ApiRequestInit = {}): Promi
 function page<T>(value: unknown, map: (value: unknown) => T): PageResult<T> { const raw = asObject(value); const items = asArray(raw.items ?? value).map(map); return { items, page: asNumber(raw.page) ?? 1, pageSize: asNumber(raw.pageSize) ?? 20, total: asNumber(raw.total) ?? items.length, totalPages: asNumber(raw.totalPages) ?? 1 } }
 
 export const api = {
-  activityHeatmap: (timezone: string) => request<ActivityHeatmapReport>(`/api/admin/dashboard/activity-heatmap${queryString({ timezone })}`),
   privacySettings: () => request<PrivacySettings>('/api/admin/privacy/settings'),
   savePrivacySettings: (body: PrivacySettings) => request<PrivacySettings>('/api/admin/privacy/settings', { method: 'PUT', body }),
   privacyTest: (text: string) => request<{ report: PrivacyReport; text: string }>('/api/admin/privacy/test', { method: 'POST', body: { text } }),

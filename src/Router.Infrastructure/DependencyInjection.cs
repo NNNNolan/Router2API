@@ -51,7 +51,6 @@ public static class DependencyInjection
         services.AddSingleton<IRealtimeMetrics, RealtimeMetrics>();
         services.AddSingleton<AnalyticsService>();
         services.AddSingleton<DashboardMetricsService>();
-        services.AddSingleton<ActivityHeatmapService>();
         services.AddSingleton<RequestObservationsService>();
         services.AddSingleton<IAnalyticsService>(sp => sp.GetRequiredService<AnalyticsService>());
         services.AddSingleton<ILogSink<ResourceEvent>, ResourceEventLogSink>();
