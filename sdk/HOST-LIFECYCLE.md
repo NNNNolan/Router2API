@@ -26,7 +26,7 @@
   → 加载默认配置 + ROUTER2API_ 环境变量 + UserSecrets + 工作目录 Config/Config.json
   → 注册认证、配置、基础设施、路由、插件目录和后台服务
   → Build 宿主
-  → 确保配置文件 / 迁移管理员密码格式 / SQLite CodeFirst 初始化
+  → 确保配置文件 / 迁移管理员密码格式 / 初始化业务库与独立日志库
   → PluginCatalog.ReloadAsync(null)
   → 注册中间件、模型 API、插件端点、前端静态资源
   → app.Run，托管调度器开始工作

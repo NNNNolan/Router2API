@@ -4,7 +4,8 @@
     "ColorMode": "light"
   },
   "Database": {
-    "Path": "data/router2api.db"
+    "Path": "data/router2api.db",
+    "LogPath": null
   },
   "Redis": {
     "ConnectionString": "localhost:6379",

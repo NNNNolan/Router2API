@@ -25,7 +25,7 @@ public sealed class ResourceSelectionPerformanceTests
         var path = Path.Combine(AppContext.BaseDirectory, "test-data", $"selection-{Guid.NewGuid():N}.db");
         var sql = new SqlCaptureLogger();
         var database = new SqlSugarDatabase(Options.Create(new DatabaseOptions { Path = path }), sql);
-        new DatabaseInitializer(database, NullLogger<DatabaseInitializer>.Instance).Initialize();
+        LogDatabaseTestHelper.Initializer(database).Initialize();
         var accounts = new AccountService(database, Mock.Of<ISharedKeyValueStore>());
         var now = DateTimeOffset.UtcNow;
         await accounts.SaveAsync(Account("active"));

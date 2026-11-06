@@ -266,15 +266,15 @@ public sealed class RequestUsageTests
     {
         var path = Path.Combine(Path.GetTempPath(), $"router-usage-{Guid.NewGuid():N}.db");
         var database = new SqlSugarDatabase(Options.Create(new DatabaseOptions { Path = path }), NullLogger<SqlSugarDatabase>.Instance);
-        new DatabaseInitializer(database, NullLogger<DatabaseInitializer>.Instance).Initialize();
-        var store = new RequestLogStore(database);
+        LogDatabaseTestHelper.Initializer(database).Initialize();
+        var store = new RequestLogStore(LogDatabaseTestHelper.For(database));
         var timestamp = new DateTimeOffset(2026, 10, 19, 0, 0, 0, TimeSpan.Zero);
         await store.WriteAsync(new RequestLog { Id = "one", Platform = "test", Model = "test/model", Success = true, Usage = new(2, 3, 5), CreatedAt = timestamp },
             new UsageMetadata("response", "response", "response", false, null));
         await store.WriteAsync(new RequestLog { Id = "two", Platform = "test", Model = "test/model", Success = false, Usage = new(4, 5, 9), CreatedAt = timestamp.AddMinutes(1) },
             new UsageMetadata("estimated", "estimated", "estimated", true, "v1"));
         await store.WriteAsync(new RequestLog { Id = "boundary", Platform = "other", Model = "other/model", Usage = new(100, 100, 200), CreatedAt = timestamp.AddHours(1) });
-        var report = await new AnalyticsService(database).QueryUsageAsync(new(timestamp, timestamp.AddHours(1)));
+        var report = await new AnalyticsService(LogDatabaseTestHelper.For(database)).QueryUsageAsync(new(timestamp, timestamp.AddHours(1)));
         report.Requests.Should().Be(2);
         report.InputTokens.Should().Be(6);
         report.OutputTokens.Should().Be(8);
@@ -287,7 +287,7 @@ public sealed class RequestUsageTests
         var page = await store.QueryAdminAsync(new RequestLogQuery(1, 20, timestamp, timestamp.AddHours(1)));
         var json = System.Text.Json.JsonSerializer.Serialize(page);
         json.Should().Contain("usageMetadata").And.Contain("estimated");
-        var filtered = await new AnalyticsService(database).QueryUsageAsync(new(timestamp, timestamp.AddHours(2), Model: "other/model"));
+        var filtered = await new AnalyticsService(LogDatabaseTestHelper.For(database)).QueryUsageAsync(new(timestamp, timestamp.AddHours(2), Model: "other/model"));
         filtered.Tokens.Should().Be(200);
     }
 
@@ -295,18 +295,20 @@ public sealed class RequestUsageTests
     public async Task AnalyticsProjectionPreservesNearestRankP95ForRangeAndBuckets()
     {
         var sqlLogger = new SqlCaptureLogger();
-        var database = new SqlSugarDatabase(Options.Create(new DatabaseOptions
+        var options = Options.Create(new DatabaseOptions
         {
             Path = Path.Combine(Path.GetTempPath(), $"router-usage-{Guid.NewGuid():N}.db")
-        }), sqlLogger);
-        new DatabaseInitializer(database, NullLogger<DatabaseInitializer>.Instance).Initialize();
-        var store = new RequestLogStore(database);
+        });
+        var database = new SqlSugarDatabase(options, NullLogger<SqlSugarDatabase>.Instance);
+        var logs = SqlSugarDatabase.CreateLogs(options, sqlLogger);
+        LogDatabaseTestHelper.Initializer(database).Initialize();
+        var store = new RequestLogStore(logs);
         var start = new DateTimeOffset(2026, 10, 20, 0, 0, 0, TimeSpan.Zero);
         foreach (var (offset, duration) in new[] { (0, 1), (1, 10), (16, 20), (17, 100) })
             await store.WriteAsync(new RequestLog { Platform = "test", Model = "test/model", CreatedAt = start.AddMinutes(offset),
                 DurationMs = duration, Success = true, Usage = new(1, 1, 2) });
 
-        var report = await new AnalyticsService(database).QueryUsageAsync(new(start, start.AddHours(1), Bucket: "15m"));
+        var report = await new AnalyticsService(logs).QueryUsageAsync(new(start, start.AddHours(1), Bucket: "15m"));
 
         report.P95LatencyMs.Should().Be(100);
         report.Buckets.Select(bucket => bucket.P95LatencyMs).Should().Equal(10, 100);
@@ -326,19 +328,19 @@ public sealed class RequestUsageTests
     public async Task ExistingDatabaseRetainsOldLogsAndAddsNullableMetadataIdempotently()
     {
         var database = TestDatabase();
-        var initializer = new DatabaseInitializer(database, NullLogger<DatabaseInitializer>.Instance);
+        var initializer = LogDatabaseTestHelper.Initializer(database);
         initializer.Initialize();
         var timestamp = DateTimeOffset.UtcNow;
-        var store = new RequestLogStore(database);
+        var store = new RequestLogStore(LogDatabaseTestHelper.For(database));
         await store.WriteAsync(new RequestLog { Id = "old", CreatedAt = timestamp, Usage = new(2, 3, 5) });
-        using (var db = database.CreateClient())
+        using (var db = LogDatabaseTestHelper.For(database).CreateClient())
             db.Ado.ExecuteCommand($"ALTER TABLE [{db.SplitHelper<RequestLogEntity>().GetTableName(timestamp.UtcDateTime)}] DROP COLUMN UsageMetadataJson");
         initializer.Initialize();
         initializer.Initialize();
         var page = await store.QueryAdminAsync(new(1, 20));
         var item = JsonSerializer.SerializeToElement(page.Items.Single());
         item.GetProperty("usageMetadata").ValueKind.Should().Be(JsonValueKind.Null);
-        var report = await new AnalyticsService(database).QueryUsageAsync(new(timestamp.AddSeconds(-1), timestamp.AddSeconds(1)));
+        var report = await new AnalyticsService(LogDatabaseTestHelper.For(database)).QueryUsageAsync(new(timestamp.AddSeconds(-1), timestamp.AddSeconds(1)));
         report.Tokens.Should().Be(5);
         report.UnknownUsageRequests.Should().Be(1);
     }
@@ -351,8 +353,8 @@ public sealed class RequestUsageTests
     public async Task PipelinePersistsTheSameUsageOnceAtTheRealWriterCompletion(string outcome)
     {
         var database = TestDatabase();
-        new DatabaseInitializer(database, NullLogger<DatabaseInitializer>.Instance).Initialize();
-        var store = new RequestLogStore(database);
+        LogDatabaseTestHelper.Initializer(database).Initialize();
+        var store = new RequestLogStore(LogDatabaseTestHelper.For(database));
         var platforms = new PlatformRegistry();
         var terminal = Mock.Of<IPlatformTerminal>();
         platforms.Register(new PlatformRegistration("test", "test", "Test", terminal));
@@ -386,7 +388,7 @@ public sealed class RequestUsageTests
         var metadata = JsonSerializer.SerializeToElement(admin.Items.Single()).GetProperty("usageMetadata").Deserialize<UsageMetadata>()!;
         metadata.Source.Should().Be("plugin");
         metadata.IsPartial.Should().Be(outcome != "complete");
-        var report = await new AnalyticsService(database).QueryUsageAsync(new(log.CreatedAt.AddSeconds(-1), log.CreatedAt.AddSeconds(1)));
+        var report = await new AnalyticsService(LogDatabaseTestHelper.For(database)).QueryUsageAsync(new(log.CreatedAt.AddSeconds(-1), log.CreatedAt.AddSeconds(1)));
         report.Tokens.Should().Be(log.Usage!.TotalTokens);
         report.Requests.Should().Be(1);
         metrics.Snapshot().ActiveConnections.Should().Be(0);

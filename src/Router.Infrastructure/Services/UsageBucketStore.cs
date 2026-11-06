@@ -5,7 +5,7 @@ using SqlSugar;
 namespace Router.Infrastructure.Services;
 
 /// <summary>按 UTC 天和平台持久化轻量用量聚合。</summary>
-public sealed class UsageBucketStore(SqlSugarDatabase database) : IUsageBucketStore
+public sealed class UsageBucketStore([Microsoft.Extensions.DependencyInjection.FromKeyedServices(SqlSugarDatabase.LogsKey)] SqlSugarDatabase database) : IUsageBucketStore
 {
     public Task RecordAsync(RequestLog log, CancellationToken cancellationToken = default)
     {

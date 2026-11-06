@@ -74,6 +74,7 @@ builder.Services.AddSingleton<PluginTaskRunner>();
 builder.Services.AddSingleton<IPluginTaskInvoker>(sp => sp.GetRequiredService<PluginTaskRunner>());
 builder.Services.AddHostedService<PluginScheduledTaskHostedService>();
 builder.Services.AddHostedService<LogCleanupHostedService>();
+builder.Services.AddLogMigration();
 builder.Services.AddHostedService<ModelMetadataWarmupHostedService>();
 builder.Services.AddSingleton<ProxySubscriptionRefreshHostedService>();
 builder.Services.AddSingleton<IProxySubscriptionRefreshQueue>(sp => sp.GetRequiredService<ProxySubscriptionRefreshHostedService>());

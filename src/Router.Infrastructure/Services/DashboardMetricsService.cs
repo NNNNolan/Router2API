@@ -6,12 +6,17 @@ namespace Router.Infrastructure.Services;
 /// <summary>从已保留的请求日志聚合总览指标，不依赖进程启动后的累计计数。</summary>
 /// <param name="database">宿主日志数据库。</param>
 /// <param name="timeProvider">供短期历史快照计算过期时间的时钟。</param>
-public sealed class DashboardMetricsService(SqlSugarDatabase database, TimeProvider? timeProvider = null)
+public sealed class DashboardMetricsService([Microsoft.Extensions.DependencyInjection.FromKeyedServices(SqlSugarDatabase.LogsKey)] SqlSugarDatabase database, TimeProvider? timeProvider = null)
 {
     private static readonly TimeSpan HistoryCacheDuration = TimeSpan.FromSeconds(15);
     private readonly object _historyLock = new();
     private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
     private CachedHistory? _history;
+
+    public void InvalidateHistory()
+    {
+        lock (_historyLock) _history = null;
+    }
 
     /// <summary>聚合历史、指定本地日期和最近一分钟的已完成请求，并附加实时进行中数。</summary>
     /// <param name="dayStart">今日开始的 UTC 时刻。</param>

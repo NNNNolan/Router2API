@@ -66,6 +66,7 @@ const navSections = computed<NavSection[]>(() => [
     { to: '/privacy', label: '隐私护栏', icon: SettingsOutline },
     { to: '/test', label: '测试窗口', icon: BeakerOutline },
     { to: '/settings/config', label: '配置中心', icon: SettingsOutline },
+    { to: '/settings/log-migration', label: '日志迁移', icon: DocumentTextOutline },
   ] },
 ])
 

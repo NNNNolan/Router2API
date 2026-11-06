@@ -98,7 +98,7 @@ public sealed class ProxyProbeConcurrencyTests
             var database = new SqlSugarDatabase(
                 Options.Create(new DatabaseOptions { Path = path }),
                 NullLogger<SqlSugarDatabase>.Instance);
-            new DatabaseInitializer(database, NullLogger<DatabaseInitializer>.Instance).Initialize();
+            LogDatabaseTestHelper.Initializer(database).Initialize();
             return Task.FromResult(new Fixture(database, path));
         }
 

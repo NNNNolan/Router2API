@@ -18,6 +18,7 @@ using Router.Host.Pipeline;
 using Router.Host.Plugins;
 using Router.Host.Privacy;
 using Router.Host.Security;
+using Router.Host.Services;
 using Router.Host.Tracing;
 using Router.Infrastructure;
 using Router.Infrastructure.Persistence;
@@ -172,6 +173,7 @@ public sealed class ObservabilityIntegrationTests
             builder.Services.Configure<LogRetentionOptions>(builder.Configuration.GetSection("Logging"));
             builder.Services.Configure<PrivacyOptions>(builder.Configuration.GetSection("Privacy"));
             builder.Services.AddRouterInfrastructure(builder.Configuration);
+            builder.Services.AddLogMigration();
             builder.Services.AddSingleton<PasswordHasher>();
             builder.Services.AddSingleton<AdminAuthService>();
             builder.Services.AddSingleton<ApiKeyService>();

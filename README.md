@@ -63,7 +63,9 @@ dotnet run --project src/Router.Host/Router.Host.csproj --no-build --no-launch-p
 
 访问 `http://127.0.0.1:5242`。模型接口使用 Bearer API Key；管理入口使用管理员 Cookie/CSRF，二者不能互换。
 
-**配置文件 `Config/Config.json` 按进程工作目录读取，优先级高于 User Secrets 和环境变量。** 首次启动会生成配置，并迁移管理员密码为哈希；后续修改环境变量不会覆盖已有 Config。先确认实际配置路径，使用独立测试数据库/Redis，不要直接带入生产账号。
+**配置文件 `Config/Config.json` 按进程工作目录读取，优先级高于 User Secrets 和环境变量。** 首次启动会生成配置，并迁移管理员密码为哈希；后续修改环境变量不会覆盖已有 Config。数据库使用 `Database.Path` 保存账号、代理和模型映射，日志使用独立 `Database.LogPath`；未设置日志路径时，默认在业务库同目录创建 `<业务库文件名>.logs.db`。配置中心修改数据库路径后需重启生效。先确认实际配置路径，使用独立测试数据库/Redis，不要直接带入生产账号。
+
+新日志从新日志库开始记录；旧业务库中的单表日志和旧的日分表不会自动复制或删除，因此切换后历史图表只显示新日志库已有的数据。需要保留旧历史时，先备份两库，再从“系统 → 日志迁移”显式扫描、复制、校验并删除已核对的旧表；迁移完成后，所有历史进入新日志库，按常规 `DataRetentionDays` 保留策略清理。不要手动覆盖现有数据库文件。
 
 在「系统 → 配置中心 → 界面主题」选择黑白极简主题（默认）或蓝色主题，保存后当前页面立即应用，其他浏览器刷新后同步，登录页也使用同一主题。设置持久化为 `Appearance.Theme`（`minimal` 为黑白，`default` 为蓝色）。未配置主题时默认黑白，已保存的主题选择保持不变。两套主题均支持右上角账户前的日间/黑夜切换，明暗模式保存为 `Appearance.ColorMode`（`light` / `dark`），刷新和重启后保留。公开接口 `GET /api/appearance` 仅返回主题和明暗模式，修改仍需管理员会话与 CSRF 校验。
 
@@ -191,12 +193,12 @@ docker logs -f router2api
 
 | 宿主机目录 / Docker 数据卷 | 容器目录 | 内容 |
 | --- | --- | --- |
-| `./volumes/data` | `/app/data` | SQLite 数据库 |
+| `./volumes/data` | `/app/data` | 业务库与同目录日志库（SQLite） |
 | `./volumes/plugins` | `/app/plugins` | 已安装插件及订阅记录 |
 | `./volumes/Config` | `/app/Config` | 宿主配置 |
 | Redis 命名卷 `router2api-redis`（Compose 会添加项目前缀） | `/data`（Redis 容器） | Redis 持久化数据 |
 
-首次启动会生成 `volumes/Config/Config.json`，其中已有的同名配置项优先于环境变量。更新容器时保留上述目录和数据卷，直接使用 `docker run` 时也应沿用相同的工作目录。镜像只包含宿主；启动后可按[安装插件](#安装插件)添加提供方插件。
+首次启动会生成 `volumes/Config/Config.json`，其中已有的同名配置项优先于环境变量。业务库和默认日志库都位于持久化的 `/app/data` 中。更新容器时保留上述目录和数据卷，直接使用 `docker run` 时也应沿用相同的工作目录。镜像只包含宿主；启动后可按[安装插件](#安装插件)添加提供方插件。
 
 ### 更新镜像
 

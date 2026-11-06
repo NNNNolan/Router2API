@@ -22,7 +22,7 @@ public sealed class ProxySubscriptionTests
             NullLogger<SqlSugarDatabase>.Instance);
         try
         {
-            new DatabaseInitializer(database, NullLogger<DatabaseInitializer>.Instance).Initialize();
+            LogDatabaseTestHelper.Initializer(database).Initialize();
             using var service = new ProxySubscriptionService(
                 database, new ProxyStore(database), new StaticHttpClientFactory(string.Empty), Mock.Of<IProxyProbeService>());
             await service.SaveAsync(new ProxySubscription
@@ -71,7 +71,7 @@ public sealed class ProxySubscriptionTests
 
         try
         {
-            new DatabaseInitializer(database, NullLogger<DatabaseInitializer>.Instance).Initialize();
+            LogDatabaseTestHelper.Initializer(database).Initialize();
             var store = new ProxyStore(database);
             var probes = new Mock<IProxyProbeService>();
             probes
@@ -155,7 +155,7 @@ public sealed class ProxySubscriptionTests
             NullLogger<SqlSugarDatabase>.Instance);
         try
         {
-            new DatabaseInitializer(database, NullLogger<DatabaseInitializer>.Instance).Initialize();
+            LogDatabaseTestHelper.Initializer(database).Initialize();
             var store = new ProxyStore(database);
             var proxy = new ProxyEndpoint
             {
@@ -223,7 +223,7 @@ public sealed class ProxySubscriptionTests
             NullLogger<SqlSugarDatabase>.Instance);
         try
         {
-            new DatabaseInitializer(database, NullLogger<DatabaseInitializer>.Instance).Initialize();
+            LogDatabaseTestHelper.Initializer(database).Initialize();
             var store = new ProxyStore(database);
             var seenProxy = new ProxyEndpoint
             {
@@ -287,7 +287,7 @@ public sealed class ProxySubscriptionTests
             logger);
         try
         {
-            new DatabaseInitializer(database, NullLogger<DatabaseInitializer>.Instance).Initialize();
+            LogDatabaseTestHelper.Initializer(database).Initialize();
             var store = new ProxyStore(database);
             await store.SaveAsync(new ProxyEndpoint
             {

@@ -139,9 +139,26 @@ export interface ConfigSnapshot {
   fileExists: boolean
   source: string
   auth: { adminEnabled: boolean; sessionLifetimeHours: number; administratorCount: number; apiKeyEnabled: boolean; apiKeyPreview: string; apiKeyConfigured: boolean }
-  database: { path: string }
+  database: { path: string; logPath: string }
   redis: { connectionString: string; instanceName: string }
   logging: { dataRetentionDays: number; cleanupCron: string; minimumPluginLogLevel: string }
+}
+export interface LogMigrationStatus {
+  status: 'idle' | 'running' | 'completed' | 'failed'
+  phase: 'idle' | 'scanning' | 'copying' | 'verifying' | 'deleting' | 'completed' | 'failed'
+  sourcePath: string
+  targetPath: string
+  restartRequired: boolean
+  totalRows: number
+  copiedRows: number
+  verifiedRows: number
+  totalTables: number
+  deletedTables: number
+  currentTable: string | null
+  progressPercent: number
+  error: string | null
+  startedAt: string | null
+  finishedAt: string | null
 }
 export interface UsageBreakdown { name: string; requests: number; inputTokens: number; outputTokens: number; tokens: number; estimatedRequests: number }
 export interface AnalyticsBucket { startUtc: string; requests: number; successes: number; failures: number; tokens: number; averageLatencyMs: number; p95LatencyMs: number; inputTokens?: number; outputTokens?: number }
@@ -297,6 +314,8 @@ export const api = {
   rotateApiKey: () => request<{ key: string }>('/api/admin/api-key/rotate', { method: 'POST' }),
   config: () => request<ConfigSnapshot>('/api/admin/config'),
   saveConfig: (payload: Record<string, unknown>) => request<ConfigSnapshot>('/api/admin/config', { method: 'PUT', body: payload }),
+  logMigrationStatus: () => request<LogMigrationStatus>('/api/admin/log-migration'),
+  logMigrationStart: () => request<LogMigrationStatus>('/api/admin/log-migration', { method: 'POST' }),
   v1Request: async (path: string, payload: Record<string, unknown>, key: string): Promise<V1TestResult> => {
     const response = await sendRequest(path, {
       method: 'POST',

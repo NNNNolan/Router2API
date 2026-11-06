@@ -54,16 +54,16 @@ public sealed class ProviderIndependenceTests
         var database = new SqlSugarDatabase(Options.Create(new DatabaseOptions { Path = path }), NullLogger<SqlSugarDatabase>.Instance);
         try
         {
-            new DatabaseInitializer(database, NullLogger<DatabaseInitializer>.Instance).Initialize();
+            LogDatabaseTestHelper.Initializer(database).Initialize();
             var options = new Mock<IOptionsMonitor<PluginLogOptions>>();
             options.SetupGet(value => value.CurrentValue).Returns(new PluginLogOptions());
-            var store = new PluginLogStore(database, options.Object);
+            var store = new PluginLogStore(LogDatabaseTestHelper.For(database), options.Object);
             await store.WriteAsync(new PluginLog
             {
                 PluginKey = pluginKey, EventType = "upstream.forbidden", StatusCode = 403,
                 Message = "test", DetailsJson = "Bearer unit-secret " + new string('x', 20000)
             });
-            using var db = database.CreateClient();
+            using var db = LogDatabaseTestHelper.For(database).CreateClient();
             var saved = db.Queryable<PluginLogEntity>().SplitTable().Single();
             saved.DetailsJson.Should().NotContain("unit-secret");
             saved.DetailsJson!.Length.Should().BeLessThanOrEqualTo(16384);

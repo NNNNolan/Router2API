@@ -37,7 +37,7 @@ public sealed class ModelMappingTests : IDisposable
     {
         var path = Path.Combine(AppContext.BaseDirectory, "test-data", $"mapping-{Guid.NewGuid():N}.db");
         _database = new SqlSugarDatabase(Options.Create(new DatabaseOptions { Path = path }), NullLogger<SqlSugarDatabase>.Instance);
-        new DatabaseInitializer(_database, NullLogger<DatabaseInitializer>.Instance).Initialize();
+        LogDatabaseTestHelper.Initializer(_database).Initialize();
         _clock.Setup(clock => clock.GetUtcNow()).Returns(() => _now);
         _health = new ModelMappingHealth(_clock.Object);
         _store = new ModelMappingStore(_database, _health);

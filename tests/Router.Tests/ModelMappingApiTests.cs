@@ -18,6 +18,7 @@ using Router.Host.Configuration;
 using Router.Host.Pipeline;
 using Router.Host.Plugins;
 using Router.Host.Security;
+using Router.Host.Services;
 using Router.Infrastructure;
 using Router.Infrastructure.Persistence;
 using Router.Infrastructure.Services;
@@ -54,6 +55,7 @@ public sealed class ModelMappingApiTests
         builder.Services.AddSingleton(Mock.Of<IPluginCatalog>());
         builder.Services.AddSingleton(Mock.Of<IProxySubscriptionRefreshQueue>());
         builder.Services.AddRouterInfrastructure(builder.Configuration);
+        builder.Services.AddLogMigration();
         builder.Services.AddSingleton<RouterPipeline>();
         builder.Services.AddSingleton(Mock.Of<IModelMetadataCatalog>());
         builder.Services.AddSingleton(Mock.Of<ISharedKeyValueStore>());

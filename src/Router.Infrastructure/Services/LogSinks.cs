@@ -8,7 +8,7 @@ using Router.Infrastructure.Persistence;
 namespace Router.Infrastructure.Services;
 
 /// <summary>基于 SqlSugar 的资源审计接收器。</summary>
-public sealed class ResourceEventLogSink(SqlSugarDatabase database) : ILogSink<Router.Contracts.Host.ResourceEvent>
+public sealed class ResourceEventLogSink([Microsoft.Extensions.DependencyInjection.FromKeyedServices(SqlSugarDatabase.LogsKey)] SqlSugarDatabase database) : ILogSink<Router.Contracts.Host.ResourceEvent>
 {
     public Task WriteAsync(Router.Contracts.Host.ResourceEvent item, CancellationToken cancellationToken = default)
     {
@@ -30,7 +30,7 @@ public sealed class ResourceEventLogSink(SqlSugarDatabase database) : ILogSink<R
 }
 
 /// <summary>持久化请求日志并提供最近审计记录。</summary>
-public sealed class RequestLogStore(SqlSugarDatabase database) : ILogSink<RequestLog>, IRequestLogStore
+public sealed class RequestLogStore([Microsoft.Extensions.DependencyInjection.FromKeyedServices(SqlSugarDatabase.LogsKey)] SqlSugarDatabase database) : ILogSink<RequestLog>, IRequestLogStore
 {
     public Task WriteAsync(RequestLog item, CancellationToken cancellationToken = default)
         => WriteAsync(item, null, cancellationToken);
@@ -151,7 +151,7 @@ public sealed class RequestLogStore(SqlSugarDatabase database) : ILogSink<Reques
     }
 }
 
-public sealed class TaskLogStore(SqlSugarDatabase database) : ITaskLogStore
+public sealed class TaskLogStore([Microsoft.Extensions.DependencyInjection.FromKeyedServices(SqlSugarDatabase.LogsKey)] SqlSugarDatabase database) : ITaskLogStore
 {
     public Task WriteAsync(TaskLog log, CancellationToken cancellationToken = default)
     {
@@ -256,7 +256,7 @@ public sealed class TaskLogStore(SqlSugarDatabase database) : ITaskLogStore
 
 /// <summary>持久化插件执行明细，并供管理端按插件、事件和时间查询。</summary>
 public sealed class PluginLogStore(
-    SqlSugarDatabase database,
+    [Microsoft.Extensions.DependencyInjection.FromKeyedServices(SqlSugarDatabase.LogsKey)] SqlSugarDatabase database,
     IOptionsMonitor<PluginLogOptions> options) : IPluginLogStore
 {
     public Task WriteAsync(PluginLog log, CancellationToken cancellationToken = default)
@@ -370,23 +370,26 @@ public sealed class PluginLogStore(
 }
 
 /// <summary>统一清理请求、资源、任务、插件和用量日志。</summary>
-public sealed class LogRetentionStore(SqlSugarDatabase database) : ILogRetentionStore
+public sealed class LogRetentionStore([Microsoft.Extensions.DependencyInjection.FromKeyedServices(SqlSugarDatabase.LogsKey)] SqlSugarDatabase database, LogMaintenanceGate gate) : ILogRetentionStore
 {
-    public Task<int> DeleteBeforeAsync(
+    public async Task<int> DeleteBeforeAsync(
         DateTimeOffset cutoffUtc,
         CancellationToken cancellationToken = default)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        var cutoff = cutoffUtc.UtcDateTime;
-        var deleted = 0;
-        using var db = database.CreateClient();
-        deleted += DailyLogTables.DeleteBefore<RequestLogEntity>(db, cutoffUtc, nameof(RequestLogEntity.CreatedAtUtc));
-        deleted += DailyLogTables.DeleteBefore<ResourceEventEntity>(db, cutoffUtc, nameof(ResourceEventEntity.CreatedAtUtc));
-        deleted += DailyLogTables.DeleteBefore<TaskLogEntity>(db, cutoffUtc, nameof(TaskLogEntity.StartedAtUtc));
-        deleted += DailyLogTables.DeleteBefore<PluginLogEntity>(db, cutoffUtc, nameof(PluginLogEntity.CreatedAtUtc));
-        deleted += db.Deleteable<UsageBucketEntity>()
-            .Where(item => item.Day < cutoff.Date)
-            .ExecuteCommand();
-        return Task.FromResult(deleted);
+        await gate.Semaphore.WaitAsync(cancellationToken);
+        try
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var cutoff = cutoffUtc.UtcDateTime;
+            var deleted = 0;
+            using var db = database.CreateClient();
+            deleted += DailyLogTables.DeleteBefore<RequestLogEntity>(db, cutoffUtc, nameof(RequestLogEntity.CreatedAtUtc));
+            deleted += DailyLogTables.DeleteBefore<ResourceEventEntity>(db, cutoffUtc, nameof(ResourceEventEntity.CreatedAtUtc));
+            deleted += DailyLogTables.DeleteBefore<TaskLogEntity>(db, cutoffUtc, nameof(TaskLogEntity.StartedAtUtc));
+            deleted += DailyLogTables.DeleteBefore<PluginLogEntity>(db, cutoffUtc, nameof(PluginLogEntity.CreatedAtUtc));
+            deleted += db.Deleteable<UsageBucketEntity>().Where(item => item.Day < cutoff.Date).ExecuteCommand();
+            return deleted;
+        }
+        finally { gate.Semaphore.Release(); }
     }
 }

@@ -14,7 +14,11 @@ public static class DependencyInjection
         IConfiguration configuration)
     {
         services.AddOptions<DatabaseOptions>()
-            .Bind(configuration.GetSection("Database"));
+            .Bind(configuration.GetSection("Database"))
+            .Validate(options => !string.Equals(Path.GetFullPath(options.Path), options.GetLogPath(),
+                OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal),
+                "Business and log database paths must be different.")
+            .ValidateOnStart();
         services.AddOptions<RedisOptions>()
             .Bind(configuration.GetSection("Redis"));
         services.AddOptions<PluginLogOptions>()
@@ -25,6 +29,10 @@ public static class DependencyInjection
             .ValidateOnStart();
 
         services.AddSingleton<SqlSugarDatabase>();
+        services.AddKeyedSingleton<SqlSugarDatabase>(SqlSugarDatabase.LogsKey, (sp, _) =>
+            SqlSugarDatabase.CreateLogs(sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<DatabaseOptions>>(),
+                sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<SqlSugarDatabase>>()));
+        services.AddSingleton<LogMaintenanceGate>();
         services.AddSingleton<DatabaseInitializer>();
         services.AddSingleton<RedisKeyValueStore>();
         services.AddSingleton<ISharedKeyValueStore>(sp => sp.GetRequiredService<RedisKeyValueStore>());

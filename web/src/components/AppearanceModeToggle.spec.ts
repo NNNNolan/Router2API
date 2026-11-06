@@ -20,7 +20,7 @@ function saved(appearance: AppearanceSettings): ConfigSnapshot {
   return {
     appearance, configPath: 'test.json', fileExists: true, source: 'test',
     auth: { adminEnabled: true, sessionLifetimeHours: 12, administratorCount: 1, apiKeyEnabled: true, apiKeyPreview: '', apiKeyConfigured: false },
-    database: { path: 'test.db' }, redis: { connectionString: '', instanceName: '' },
+    database: { path: 'test.db', logPath: 'test.logs.db' }, redis: { connectionString: '', instanceName: '' },
     logging: { dataRetentionDays: 30, cleanupCron: '', minimumPluginLogLevel: 'Information' },
   }
 }

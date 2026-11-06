@@ -475,7 +475,7 @@ public sealed class JsCapabilityParityTests
                 .Returns((string key, long delta, TimeSpan ttl, CancellationToken token) => memory.IncrementAsync(key, delta, ttl, token));
             Shared = shared.Object;
             _database = new SqlSugarDatabase(Options.Create(new DatabaseOptions { Path = _databasePath }), NullLogger<SqlSugarDatabase>.Instance);
-            new DatabaseInitializer(_database, NullLogger<DatabaseInitializer>.Instance).Initialize();
+            LogDatabaseTestHelper.Initializer(_database).Initialize();
             Accounts = new AccountService(_database, Shared);
             Native = new PluginServices("api", ["api"], Accounts, Mock.Of<IModelCatalog>(), Mock.Of<IModelMetadataCatalog>(),
                 _transport, Pool.Object, Shared, () => Mock.Of<IPluginTaskInvoker>(), Mock.Of<ITaskLogStore>(), Logs.Object,

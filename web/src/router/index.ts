@@ -17,6 +17,7 @@ import ModelPlazaPage from '@/pages/ModelPlazaPage.vue'
 import ModelMappingsPage from '@/pages/ModelMappingsPage.vue'
 import PrivacyPage from '@/pages/PrivacyPage.vue'
 import TracesPage from '@/pages/TracesPage.vue'
+import LogMigrationPage from '@/pages/LogMigrationPage.vue'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -44,6 +45,7 @@ const router = createRouter({
         { path: 'task-logs', name: 'task-logs', component: TaskLogsPage },
         { path: 'plugin-logs', name: 'plugin-logs', component: PluginLogsPage },
         { path: 'settings/config', name: 'config', component: ConfigPage },
+        { path: 'settings/log-migration', name: 'log-migration', component: LogMigrationPage },
       ],
     },
   ],

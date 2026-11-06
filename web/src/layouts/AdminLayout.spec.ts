@@ -88,7 +88,7 @@ function expectMenus(keys: string[]) {
 describe('顶部和移动端导航', () => {
   it('键盘导航连续切换页面时内容不会因过渡状态变化而丢失', async () => {
     const { view } = await renderPlugins([plugin('active')])
-    for (const path of ['/accounts', '/analytics', '/plugins', '/models', '/model-mappings', '/logs', '/plugin-logs', '/task-logs', '/']) {
+    for (const path of ['/accounts', '/analytics', '/plugins', '/models', '/model-mappings', '/logs', '/plugin-logs', '/task-logs', '/settings/log-migration', '/']) {
       await view.get(`.desktop-navigation a[href="${path}"]`).trigger('click')
       await flushPromises()
       await vi.waitFor(() => expect(view.find(path === '/plugins' ? '.plugin-card' : '[data-route-page]').exists()).toBe(true))
@@ -103,7 +103,7 @@ describe('顶部和移动端导航', () => {
       const sections = nav.findAll('details')
       expect(sections.find(section => section.get('summary').text() === '总览')!.findAll('a').map(link => link.attributes('href'))).toEqual(['/', '/analytics'])
       expect(sections.find(section => section.get('summary').text() === '日志')!.findAll('a').map(link => link.attributes('href'))).toEqual(['/traces', '/logs', '/plugin-logs', '/task-logs'])
-      expect(sections.find(section => section.get('summary').text() === '系统')!.findAll('a').map(link => link.attributes('href'))).toEqual(['/privacy', '/test', '/settings/config'])
+      expect(sections.find(section => section.get('summary').text() === '系统')!.findAll('a').map(link => link.attributes('href'))).toEqual(['/privacy', '/test', '/settings/config', '/settings/log-migration'])
       expect(nav.find('a[href="/models"]').text()).toContain('模型广场')
       expect(nav.find('a[href="/model-mappings"]').text()).toContain('模型映射')
       const menu = nav.findAll('details').find(item => item.text().includes('插件管理'))!

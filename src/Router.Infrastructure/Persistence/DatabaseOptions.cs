@@ -4,6 +4,16 @@ namespace Router.Infrastructure.Persistence;
 public sealed class DatabaseOptions
 {
     public string Path { get; set; } = "data/router2api.db";
+    public string? LogPath { get; set; }
+
+    public string GetLogPath()
+    {
+        var businessPath = System.IO.Path.GetFullPath(Path);
+        return System.IO.Path.GetFullPath(string.IsNullOrWhiteSpace(LogPath)
+            ? System.IO.Path.Combine(System.IO.Path.GetDirectoryName(businessPath)!,
+                System.IO.Path.GetFileNameWithoutExtension(businessPath) + ".logs.db")
+            : LogPath.Trim());
+    }
 }
 
 /// <summary>Redis 运行态配置。节点策略没有内存事实回退。</summary>

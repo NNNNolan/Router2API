@@ -83,7 +83,7 @@ public sealed class ProxySubscriptionIntervalTests
                     """);
             }
 
-            var initializer = new DatabaseInitializer(database, NullLogger<DatabaseInitializer>.Instance);
+            var initializer = LogDatabaseTestHelper.Initializer(database);
             initializer.Initialize();
             using var service = new ProxySubscriptionService(database, new ProxyStore(database),
                 Mock.Of<IHttpClientFactory>(), Mock.Of<IProxyProbeService>());

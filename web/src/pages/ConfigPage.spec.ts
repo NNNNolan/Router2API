@@ -1,6 +1,6 @@
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query'
-import { NButton, NSelect } from 'naive-ui'
+import { NButton, NInput, NSelect } from 'naive-ui'
 import { afterEach, expect, it, vi } from 'vitest'
 import { api, type ConfigSnapshot } from '@/services/api'
 import ConfigPage from './ConfigPage.vue'
@@ -10,7 +10,7 @@ vi.mock('naive-ui', async importOriginal => ({ ...await importOriginal<typeof im
 const initial: ConfigSnapshot = {
   configPath: 'test/config.json', fileExists: true, source: 'test', appearance: { theme: 'default', colorMode: 'light' },
   auth: { adminEnabled: true, sessionLifetimeHours: 12, administratorCount: 1, apiKeyEnabled: true, apiKeyPreview: '********', apiKeyConfigured: true },
-  database: { path: 'test.db' }, redis: { connectionString: '', instanceName: 'test:' },
+  database: { path: 'test.db', logPath: 'test.logs.db' }, redis: { connectionString: '', instanceName: 'test:' },
   logging: { dataRetentionDays: 30, cleanupCron: '0 0 3 * * *', minimumPluginLogLevel: 'Information' },
 }
 let view: VueWrapper | undefined
@@ -25,6 +25,7 @@ async function render() {
   await flushPromises()
   await vi.waitFor(() => expect(view!.findAllComponents(NSelect)).toHaveLength(2))
   view.findAllComponents(NSelect)[0]!.vm.$emit('update:value', 'minimal')
+  view.findAllComponents(NInput).find(input => input.props('value') === 'test.logs.db')!.vm.$emit('update:value', 'custom-logs.db')
   await flushPromises()
   return view
 }
@@ -40,6 +41,7 @@ it('选择主题后保存到服务器，成功后才更新全局主题', async (
   expect(client!.getQueryData(['appearance'])).toEqual({ theme: 'default', colorMode: 'light' })
   await save()
   expect(write).toHaveBeenCalledWith(expect.objectContaining({ appearance: { theme: 'minimal' } }))
+  expect(write).toHaveBeenCalledWith(expect.objectContaining({ database: { path: 'test.db', logPath: 'custom-logs.db' } }))
   expect(client!.getQueryData(['appearance'])).toEqual({ theme: 'minimal', colorMode: 'light' })
   expect(message.success).toHaveBeenCalled()
 })

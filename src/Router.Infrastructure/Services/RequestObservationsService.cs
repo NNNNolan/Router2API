@@ -7,7 +7,7 @@ using SqlSugar;
 namespace Router.Infrastructure.Services;
 
 /// <summary>护栏和追踪均投影现有请求日志，沿用同一保留和删除边界。</summary>
-public sealed class RequestObservationsService(SqlSugarDatabase database)
+public sealed class RequestObservationsService([Microsoft.Extensions.DependencyInjection.FromKeyedServices(SqlSugarDatabase.LogsKey)] SqlSugarDatabase database)
 {
     public PagedResult<ObservedRequest> Requests(DateTimeOffset from, DateTimeOffset to, int page, int pageSize, string? pluginKey,
         bool privacyOnly = false, CancellationToken cancellationToken = default)

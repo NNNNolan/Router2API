@@ -57,7 +57,7 @@ public sealed class ConfigFileService(
                 auth.CurrentValue.ApiKey.Enabled,
                 apiKeys.Masked(),
                 !string.IsNullOrWhiteSpace(apiKeys.Current)),
-            new ConfigDatabaseSnapshot(database.CurrentValue.Path),
+            new ConfigDatabaseSnapshot(database.CurrentValue.Path, database.CurrentValue.GetLogPath()),
             new ConfigRedisSnapshot(redis.CurrentValue.ConnectionString, redis.CurrentValue.InstanceName),
             new ConfigLoggingSnapshot(
                 retention.CurrentValue.DataRetentionDays,
@@ -131,8 +131,20 @@ public sealed class ConfigFileService(
             }
         }
 
-        if (request.Database is { } databaseUpdate && !string.IsNullOrWhiteSpace(databaseUpdate.Path))
-            GetOrCreateObject(root, "Database")["Path"] = databaseUpdate.Path.Trim();
+        if (request.Database is { } databaseUpdate)
+        {
+            var businessPath = string.IsNullOrWhiteSpace(databaseUpdate.Path) ? database.CurrentValue.Path : databaseUpdate.Path.Trim();
+            var logPath = databaseUpdate.LogPath is null ? database.CurrentValue.LogPath : databaseUpdate.LogPath.Trim();
+            var candidate = new DatabaseOptions { Path = businessPath, LogPath = logPath };
+            if (string.Equals(Path.GetFullPath(businessPath), candidate.GetLogPath(),
+                    OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+                throw new ArgumentException("业务数据库和日志数据库路径必须不同。", nameof(request));
+
+            var databaseNode = GetOrCreateObject(root, "Database");
+            if (!string.IsNullOrWhiteSpace(databaseUpdate.Path)) databaseNode["Path"] = databaseUpdate.Path.Trim();
+            if (databaseUpdate.LogPath is not null)
+                databaseNode["LogPath"] = string.IsNullOrWhiteSpace(databaseUpdate.LogPath) ? null : databaseUpdate.LogPath.Trim();
+        }
 
         if (request.Redis is { } redisUpdate)
         {
@@ -171,7 +183,7 @@ public sealed class ConfigFileService(
     private JsonObject BuildInitialDocument()
         => new()
         {
-            ["Database"] = new JsonObject { ["Path"] = database.CurrentValue.Path },
+            ["Database"] = new JsonObject { ["Path"] = database.CurrentValue.Path, ["LogPath"] = database.CurrentValue.LogPath },
             ["Redis"] = new JsonObject
             {
                 ["ConnectionString"] = redis.CurrentValue.ConnectionString,
@@ -249,7 +261,7 @@ public sealed record ConfigAuthSnapshot(
     string ApiKeyPreview,
     bool ApiKeyConfigured);
 
-public sealed record ConfigDatabaseSnapshot(string Path);
+public sealed record ConfigDatabaseSnapshot(string Path, string LogPath);
 
 public sealed record ConfigRedisSnapshot(string ConnectionString, string InstanceName);
 
@@ -295,6 +307,7 @@ public sealed class ConfigApiKeyUpdate
 public sealed class ConfigDatabaseUpdate
 {
     public string? Path { get; init; }
+    public string? LogPath { get; init; }
 }
 
 public sealed class ConfigRedisUpdate

@@ -6,7 +6,7 @@ using Router.Infrastructure.Persistence;
 namespace Router.Infrastructure.Services;
 
 /// <summary>从 request_logs 持久化事实生成时间范围分析，不把历史图表建立在内存计数器上。</summary>
-public sealed class AnalyticsService(SqlSugarDatabase database) : IAnalyticsService
+public sealed class AnalyticsService([Microsoft.Extensions.DependencyInjection.FromKeyedServices(SqlSugarDatabase.LogsKey)] SqlSugarDatabase database) : IAnalyticsService
 {
     public async Task<AnalyticsReport> QueryAsync(
         AnalyticsQuery query,

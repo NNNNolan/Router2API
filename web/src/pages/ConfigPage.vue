@@ -17,6 +17,7 @@ const form = reactive({
   apiKeyEnabled: true,
   apiKey: '',
   databasePath: 'data/router2api.db',
+  databaseLogPath: 'data/router2api.logs.db',
   redisConnectionString: 'localhost:6379',
   redisInstanceName: 'router2api:',
   dataRetentionDays: 30,
@@ -31,6 +32,7 @@ watch(() => query.data.value, value => {
   form.sessionLifetimeHours = value.auth.sessionLifetimeHours
   form.apiKeyEnabled = value.auth.apiKeyEnabled
   form.databasePath = value.database.path
+  form.databaseLogPath = value.database.logPath
   form.redisConnectionString = value.redis.connectionString
   form.redisInstanceName = value.redis.instanceName
   form.dataRetentionDays = value.logging.dataRetentionDays
@@ -48,7 +50,7 @@ async function save() {
         sessionLifetimeHours: form.sessionLifetimeHours,
         apiKey: { enabled: form.apiKeyEnabled, key: form.apiKey.trim() || undefined },
       },
-      database: { path: form.databasePath.trim() },
+      database: { path: form.databasePath.trim(), logPath: form.databaseLogPath.trim() },
       redis: { connectionString: form.redisConnectionString.trim(), instanceName: form.redisInstanceName },
       logging: { dataRetentionDays: form.dataRetentionDays, cleanupCron: form.cleanupCron.trim(), minimumPluginLogLevel: form.minimumPluginLogLevel },
     })
@@ -141,6 +143,10 @@ async function refreshProtocols() {
           <NFormItem label="SQLite 文件路径">
             <NInput v-model:value="form.databasePath" />
           </NFormItem>
+          <NFormItem label="日志数据库路径">
+            <NInput v-model:value="form.databaseLogPath" />
+          </NFormItem>
+          <p class="field-help">留空时使用业务数据库同目录下的 .logs.db 文件。修改后需要重启宿主。</p>
           <p class="field-help">修改数据库或 Redis 后需要重启宿主才会切换连接。</p>
         </NCard>
 

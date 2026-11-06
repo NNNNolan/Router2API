@@ -20,6 +20,7 @@ public static class ApiEndpoints
     public static void Map(WebApplication app)
     {
         ModelMappingEndpoints.Map(app);
+        LogMigrationEndpoints.Map(app);
         ObservabilityEndpoints.Map(app);
         // 登录页也需要外观设置，只公开主题和明暗模式，不读取管理员配置快照。
         app.MapGet("/api/appearance", (IOptionsMonitor<AppearanceOptions> options, HttpContext context) =>

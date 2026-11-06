@@ -73,6 +73,19 @@ public sealed class AppearanceConfigurationTests
         config.Get().Appearance.Theme.Should().Be("minimal");
     }
 
+    [TestMethod]
+    public async Task LegacyDatabasePathUpdatePreservesConfiguredLogPath()
+    {
+        var path = TestPath();
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, "{\"Database\":{\"Path\":\"business.db\",\"LogPath\":\"custom-logs.db\"}}");
+        using var services = CreateServices(path);
+        var config = services.GetRequiredService<ConfigFileService>();
+        (await config.SaveAsync(new() { Database = new() { Path = "changed.db" } })).Database.LogPath
+            .Should().Be(Path.GetFullPath("custom-logs.db"));
+        JsonNode.Parse(File.ReadAllText(path))!["Database"]!["LogPath"]!.GetValue<string>().Should().Be("custom-logs.db");
+    }
+
     private static string TestPath() => Path.Combine(AppContext.BaseDirectory, "test-data", $"appearance-{Guid.NewGuid():N}.json");
 
     private static ServiceProvider CreateServices(string path)
