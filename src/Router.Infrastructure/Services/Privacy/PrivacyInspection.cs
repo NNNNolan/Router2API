@@ -9,6 +9,9 @@ public sealed class PrivacyInspection(PrivacyPolicy policy) : IDisposable
 {
     private const int MatchLimit = 1024;
     private const int TextLimit = 16 * 1024 * 1024;
+    private static readonly Regex Base64Images = new(
+        @"data:image/[a-z0-9.+-]+(?:;[a-z0-9.+-]+=[^;,\s""'<>]+)*;base64,[a-z0-9+/]+={0,2}",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.NonBacktracking, TimeSpan.FromMilliseconds(500));
     private readonly Stopwatch _clock = Stopwatch.StartNew();
     private readonly Dictionary<string, string> _originals = new(StringComparer.Ordinal);
     private readonly Dictionary<string, string> _placeholders = new(StringComparer.Ordinal);
@@ -34,20 +37,24 @@ public sealed class PrivacyInspection(PrivacyPolicy policy) : IDisposable
         var matches = new List<(int Start, int Length, PrivacyRule Rule)>();
         try
         {
+            var textRanges = TextRanges(text);
             foreach (var rule in policy.Rules)
             {
-                foreach (Match match in rule.Regex.Matches(text))
+                foreach (var (start, length) in textRanges)
                 {
-                    if (match.Length == 0) return Fail("隐私规则匹配了空字符串。");
-                    if (rule.Category == "credit_card" && !IsCard(match.Value)) continue;
-                    if (++_matches > MatchLimit || _clock.Elapsed > TimeSpan.FromSeconds(5))
-                        return Fail("隐私检测超过请求预算。");
-                    _blocked |= rule.Action == "block";
-                    if (!_hits.TryGetValue(rule.Id, out var hits)) _hits[rule.Id] = hits = [];
-                    // 不保留任何原始字符；样本只描述长度，调试日志也不会成为敏感数据的第二份副本。
-                    hits.Add((rule.Category, rule.Action, $"••••（{match.Length} 字符）"));
-                    if (rule.Action == "redact")
-                        matches.Add((match.Index, match.Length, rule));
+                    for (var match = rule.Regex.Match(text, start, length); match.Success; match = match.NextMatch())
+                    {
+                        if (match.Length == 0) return Fail("隐私规则匹配了空字符串。");
+                        if (rule.Category == "credit_card" && !IsCard(match.Value)) continue;
+                        if (++_matches > MatchLimit || _clock.Elapsed > TimeSpan.FromSeconds(5))
+                            return Fail("隐私检测超过请求预算。");
+                        _blocked |= rule.Action == "block";
+                        if (!_hits.TryGetValue(rule.Id, out var hits)) _hits[rule.Id] = hits = [];
+                        // 不保留任何原始字符；样本只描述长度，调试日志也不会成为敏感数据的第二份副本。
+                        hits.Add((rule.Category, rule.Action, $"••••（{match.Length} 字符）"));
+                        if (rule.Action == "redact")
+                            matches.Add((match.Index, match.Length, rule));
+                    }
                 }
             }
         }
@@ -89,6 +96,20 @@ public sealed class PrivacyInspection(PrivacyPolicy policy) : IDisposable
     {
         _error = message;
         throw new PrivacyInspectionException(message);
+    }
+
+    private static List<(int Start, int Length)> TextRanges(string text)
+    {
+        // 图片编码不参与文本规则；保留原始偏移，避免脱敏正文时改坏图片或漏掉前后文本。
+        var ranges = new List<(int Start, int Length)>();
+        var start = 0;
+        foreach (Match image in Base64Images.Matches(text))
+        {
+            if (image.Index > start) ranges.Add((start, image.Index - start));
+            start = image.Index + image.Length;
+        }
+        if (start < text.Length) ranges.Add((start, text.Length - start));
+        return ranges;
     }
 
     private static bool IsCard(string text)

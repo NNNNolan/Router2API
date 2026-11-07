@@ -168,6 +168,11 @@ public sealed class PrivacyRequestGuard : IDisposable
     private static RequestTextMode ChildMode(JsonElement owner, string name, RequestTextMode mode)
     {
         name = name.ToLowerInvariant();
+        var type = owner.TryGetProperty("type", out var field) && field.ValueKind == JsonValueKind.String ? field.GetString() : null;
+        // 工具参数和结果中的嵌套图片也遵守协议内容块的二进制边界。
+        if (mode is RequestTextMode.AllValues or RequestTextMode.Message or RequestTextMode.Part
+            && type is "image" or "image_url" or "input_image" or "file" or "input_file" or "encrypted_thinking")
+            return RequestTextMode.None;
         if (mode == RequestTextMode.AllValues)
             return name is "file_data" or "image_url" or "file_url" or "encrypted_content" or "signature"
                 ? RequestTextMode.None : RequestTextMode.AllValues;
@@ -184,9 +189,6 @@ public sealed class PrivacyRequestGuard : IDisposable
             };
         if (mode is RequestTextMode.Message or RequestTextMode.Part)
         {
-            var type = owner.TryGetProperty("type", out var field) && field.ValueKind == JsonValueKind.String ? field.GetString() : null;
-            if (type is "image" or "image_url" or "input_image" or "file" or "input_file" or "encrypted_thinking")
-                return RequestTextMode.None;
             return name switch
             {
                 "content" => RequestTextMode.Content,
