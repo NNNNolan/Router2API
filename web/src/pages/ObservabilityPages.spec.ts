@@ -34,12 +34,12 @@ it('护栏关闭状态仍能编辑规则和使用测试，语音边界始终可�
   view.getComponent(NTabs).vm.$emit('update:value', 'rules')
   await flushPromises()
   expect(view.text()).toContain('保存设置')
-  const whitelist = view.findAllComponents(NSelect).find(select => select.props('placeholder') === '选择插件 Key 或平台入口')
+  const whitelist = view.findAllComponents(NSelect).find(select => select.props('placeholder') === '选择插件 Key')
   expect(whitelist).toBeTruthy()
-  const options = JSON.stringify(whitelist!.props('options'))
-  expect(options).toContain('power.purge')
-  expect(options).toContain('Purge')
-  expect(options).toContain('已停用')
+  expect(whitelist!.props('options')).toEqual([{
+    type: 'group', key: 'plugins', label: '插件 Key（跳过该插件所有入口的 block）',
+    children: [{ label: 'demo', value: 'demo' }, { label: 'power.purge', value: 'power.purge' }],
+  }])
   view.getComponent(NTabs).vm.$emit('update:value', 'tester')
   await flushPromises()
   expect(view.text()).toContain('检测文本')

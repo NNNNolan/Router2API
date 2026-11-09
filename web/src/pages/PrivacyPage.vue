@@ -30,22 +30,15 @@ const platforms = useQuery({ queryKey: ['platforms'], queryFn: api.platforms })
 const whitelistOptions = computed(() => {
   const items = platforms.data.value ?? []
   const plugins = [...new Set(items.map(item => item.pluginKey).filter(Boolean))].sort((left, right) => left.localeCompare(right, 'zh-CN'))
-  const known = new Set([...plugins, ...items.map(item => item.name)])
-  const missing = whitelist.value.filter(value => !known.has(value))
+  const known = new Set(plugins.map(value => value.toLowerCase()))
+  const missing = [...new Set(whitelist.value.map(value => value.trim()).filter(value => value && !known.has(value.toLowerCase())))]
   const options: { type: 'group'; key: string; label: string; children: { label: string; value: string }[] }[] = []
   if (plugins.length) options.push({
     type: 'group', key: 'plugins', label: '插件 Key（跳过该插件所有入口的 block）',
     children: plugins.map(value => ({ label: value, value })),
   })
-  if (items.length) options.push({
-    type: 'group', key: 'platforms', label: '平台入口',
-    children: items.map(item => ({
-      value: item.name,
-      label: `${item.displayName && item.displayName !== item.name ? `${item.displayName}（${item.name}）` : item.name}${item.enabled ? '' : ' · 已停用'}`,
-    })).sort((left, right) => left.label.localeCompare(right.label, 'zh-CN')),
-  })
   if (missing.length) options.push({
-    type: 'group', key: 'saved', label: '已保存但当前未注册',
+    type: 'group', key: 'saved', label: '已保存但当前插件未注册',
     children: missing.map(value => ({ label: value, value })),
   })
   return options
@@ -128,7 +121,7 @@ const columns: DataTableColumns<ObservedRequest> = [
           <div class="privacy-switch-row"><div><strong>仅检测模式</strong><p class="metric-note">只检测和记录，不阻断、不修改正文。确认规则后再关闭此开关。</p></div><NSwitch v-model:value="draft.dryRun" aria-label="仅检测模式" /></div>
           <NFormItem label="全局默认动作"><NSelect v-model:value="draft.defaultAction" :options="privacyActions" /></NFormItem>
           <NFormItem label="插件白名单（跳过 block）">
-            <NSelect v-model:value="whitelist" multiple filterable :options="whitelistOptions" :loading="platforms.isPending.value" placeholder="选择插件 Key 或平台入口" />
+            <NSelect v-model:value="whitelist" multiple filterable :options="whitelistOptions" :loading="platforms.isPending.value" placeholder="选择插件 Key" />
           </NFormItem>
           <NAlert v-if="platforms.isError.value" type="warning" :show-icon="false" class="mt-16">
             插件列表加载失败，当前仅保留已保存项。<NButton text type="primary" @click="platforms.refetch()">重新加载</NButton>
