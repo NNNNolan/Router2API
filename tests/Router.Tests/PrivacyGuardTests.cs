@@ -1,5 +1,7 @@
 using System.Text.Json;
+using System.Net;
 using FluentAssertions;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Options;
 using Moq;
 using Router.Contracts.Domain;
@@ -274,10 +276,101 @@ public sealed class PrivacyGuardTests
         Action scan = () => inspection.Inspect(string.Join(" ", Enumerable.Repeat("person@example.com", 1025)));
         scan.Should().Throw<PrivacyInspectionException>();
         inspection.Report().Error.Should().NotBeNull();
+        inspection.Report().Blocked.Should().BeFalse();
+        inspection.Report().Redactions.Should().Be(0);
         JsonSerializer.Serialize(inspection.Report()).Should().NotContain("person@example.com");
     }
 
+    [TestMethod]
+    public void PluginWhitelistSkipsBlockButKeepsOtherRules()
+    {
+        var settings = Settings("block");
+        settings.WhitelistPlugins.Add("power.purge");
+        using var guard = Guard(settings);
+
+        using var direct = guard.Begin(new AdapterRequest { Model = "Purge/alias" }, "Purge", "power.purge");
+        direct.Should().NotBeNull();
+        direct!.SkipBlock.Should().BeTrue();
+        direct.Inspect("person@example.com").Should().Be("person@example.com");
+        direct.Blocked.Should().BeFalse("白名单只跳过 block");
+
+        var forwarded = new AdapterRequest();
+        forwarded.RequestHeaders[PrivacyForwarding.SourcePluginHeader] = "power.purge";
+        using var loopback = guard.Begin(forwarded, "workbuddy", "workbuddy", isLoopback: true);
+        loopback.Should().NotBeNull();
+        loopback!.SkipBlock.Should().BeTrue();
+        using var notLoopback = guard.Begin(forwarded, "workbuddy", "workbuddy", isLoopback: false);
+        notLoopback.Should().NotBeNull("来源插件头只有真实回环连接才能生效");
+        notLoopback!.SkipBlock.Should().BeFalse();
+
+        var unlisted = new AdapterRequest();
+        unlisted.RequestHeaders[PrivacyForwarding.SourcePluginHeader] = "other.plugin";
+        using var notWhitelisted = guard.Begin(unlisted, "workbuddy", "workbuddy", isLoopback: true);
+        notWhitelisted.Should().NotBeNull();
+        notWhitelisted!.SkipBlock.Should().BeFalse();
+        notWhitelisted.Inspect("person@example.com");
+        notWhitelisted.Blocked.Should().BeTrue("非白名单插件仍执行拦截");
+    }
+
+    [TestMethod]
+    public void PluginWhitelistStillRedacts()
+    {
+        var settings = Settings("redact");
+        settings.WhitelistPlugins.Add("power.purge");
+        using var guard = Guard(settings);
+        using var inspection = guard.Begin(new AdapterRequest { Model = "Purge/alias" }, "Purge", "power.purge");
+        inspection.Should().NotBeNull();
+        var transformed = inspection!.Inspect("person@example.com");
+        transformed.Should().NotBe("person@example.com");
+        inspection.Blocked.Should().BeFalse();
+        inspection.RestoreMap.Values.Should().Contain("person@example.com");
+    }
+
+    [TestMethod]
+    public void PluginWhitelistRejectsDuplicateAndInvalidEntries()
+    {
+        var settings = Settings("warn");
+        settings.WhitelistPlugins.Add("power.purge");
+        settings.WhitelistPlugins.Add("POWER.PURGE");
+        Action build = () => PrivacyPolicy.Build(settings);
+        build.Should().Throw<ArgumentException>();
+
+        settings.WhitelistPlugins.Clear();
+        settings.WhitelistPlugins.Add("bad/value");
+        build.Should().Throw<ArgumentException>();
+
+        settings.WhitelistPlugins.Clear();
+        settings.WhitelistPlugins.Add("");
+        build.Should().Throw<ArgumentException>();
+    }
+
+    [TestMethod]
+    public void RawConnectionKeepsLoopbackDecisionAfterForwardedHeadersRun()
+    {
+        var context = new DefaultHttpContext();
+        context.Connection.RemoteIpAddress = IPAddress.Loopback;
+        RawConnection.Capture(context);
+        context.Connection.RemoteIpAddress = IPAddress.Parse("203.0.113.10");
+
+        RawConnection.IsLoopback(context).Should().BeTrue("转发头不能把外部连接伪装成回环");
+
+        var external = new DefaultHttpContext();
+        external.Connection.RemoteIpAddress = IPAddress.Parse("203.0.113.10");
+        RawConnection.Capture(external);
+        RawConnection.IsLoopback(external).Should().BeFalse();
+    }
+
     internal static PrivacyOptions Settings(string action, bool dryRun = false) => new() { Enabled = true, DryRun = dryRun, DefaultAction = action };
+
+    private static PrivacyRequestGuard Guard(PrivacyOptions settings)
+    {
+        var monitor = new Mock<IOptionsMonitor<PrivacyOptions>>();
+        monitor.SetupGet(value => value.CurrentValue).Returns(settings);
+        monitor.Setup(value => value.OnChange(It.IsAny<Action<PrivacyOptions, string?>>()))
+            .Returns(Mock.Of<IDisposable>());
+        return new PrivacyRequestGuard(monitor.Object);
+    }
+
     internal static TestEndpoint Endpoint(string value) => value switch
     {
         "/v1/completions" => TestEndpoint.Completions, "/v1/responses" => TestEndpoint.Responses,

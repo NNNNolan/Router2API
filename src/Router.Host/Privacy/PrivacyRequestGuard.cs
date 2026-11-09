@@ -23,12 +23,22 @@ public sealed class PrivacyRequestGuard : IDisposable
     /// <summary>配置快照副本，调用方不能改变正在处理的请求策略。</summary>
     public PrivacyOptions Settings => Volatile.Read(ref _policy).Options.Clone();
 
-    /// <summary>语音合成明确不受保护；其他入口使用同一策略快照。</summary>
-    public PrivacyInspection? Begin(AdapterRequest request)
+    /// <summary>语音合成明确不受保护；白名单只跳过 block 规则，脱敏和告警仍执行。</summary>
+    public PrivacyInspection? Begin(
+        AdapterRequest request,
+        string? platform = null,
+        string? pluginKey = null,
+        bool isLoopback = false)
     {
         var policy = Volatile.Read(ref _policy);
-        return !policy.Options.Enabled || request.Endpoint == "/v1/audio/speech" ? null : new PrivacyInspection(policy);
+        if (!policy.Options.Enabled || request.Endpoint == "/v1/audio/speech") return null;
+        var forwardedPlugin = isLoopback ? PrivacyForwarding.ReadSourcePlugin(request) : null;
+        return new PrivacyInspection(policy, policy.IsWhitelisted(platform, pluginKey, forwardedPlugin));
     }
+
+    /// <summary>判断入口插件是否需要把来源身份带到自己的回环请求。</summary>
+    public bool IsWhitelisted(string? platform, string? pluginKey)
+        => Volatile.Read(ref _policy).IsWhitelisted(platform, pluginKey);
 
     /// <summary>用于管理员试用，不读取或保存输入；强制检测，即使正式功能关闭。</summary>
     public PrivacyInspection BeginTest() => new(Volatile.Read(ref _policy));

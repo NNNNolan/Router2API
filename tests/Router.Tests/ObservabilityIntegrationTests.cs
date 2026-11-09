@@ -132,6 +132,69 @@ public sealed class ObservabilityIntegrationTests
         detail!.Id.Should().Be(row.Id);
     }
 
+    [TestMethod]
+    public async Task WhitelistedPluginSkipsBlockButKeepsRedactionAndSourceMarker()
+    {
+        await using var host = await Host.Create(values =>
+        {
+            values["Privacy:Enabled"] = "true";
+            values["Privacy:DryRun"] = "false";
+            values["Privacy:DefaultAction"] = "block";
+            values["Privacy:CategoryActions:email"] = "redact";
+            values["Privacy:WhitelistPlugins:0"] = "Purge";
+        });
+        var guard = host.App.Services.GetRequiredService<PrivacyRequestGuard>();
+        guard.Settings.Enabled.Should().BeTrue();
+        guard.Settings.DefaultAction.Should().Be("block");
+        guard.Settings.WhitelistPlugins.Should().ContainSingle().Which.Should().Be("Purge");
+        var terminal = new Mock<IPlatformTerminal>();
+        string? sourceMarker = null;
+        string? content = null;
+        var invocations = 0;
+        terminal.Setup(value => value.InvokeAsync(It.IsAny<PluginAttemptContext>())).Returns((PluginAttemptContext context) =>
+        {
+            invocations++;
+            sourceMarker = context.Request.RequestHeaders.GetValueOrDefault("x-router2api-source-plugin");
+            content = context.Request.Messages.Count > 0 ? context.Request.Messages[0].Content : null;
+            return Task.FromResult(new PluginInvocationResult(new AdapterResponse
+            {
+                StatusCode = 200,
+                Completion = new(context.Request.Model, content)
+            }, new PluginAttemptResult(PluginAttemptOutcome.Healthy)));
+        });
+        host.App.Services.GetRequiredService<IPlatformRegistry>()
+            .Register(new("Purge", "power.purge", "Purge", terminal.Object));
+        using var client = host.App.GetTestClient();
+        client.DefaultRequestHeaders.Authorization = new("Bearer", host.ApiKey);
+
+        using var response = await client.PostAsJsonAsync("/v1/chat/completions", new
+        {
+            model = "Purge/alias",
+            messages = new[] { new { role = "user", content = "person@example.com" } }
+        });
+        response.EnsureSuccessStatusCode();
+        sourceMarker.Should().Be("Purge");
+        content.Should().NotBeNull().And.Contain("[R2A_").And.NotContain("person@example.com");
+        (await response.Content.ReadAsStringAsync()).Should().Contain("person@example.com", "响应仍按还原映射恢复原文");
+
+        using var skippedBlock = await client.PostAsJsonAsync("/v1/chat/completions", new
+        {
+            model = "Purge/alias",
+            messages = new[] { new { role = "user", content = "13800138000" } }
+        });
+        skippedBlock.EnsureSuccessStatusCode();
+        content.Should().Contain("13800138000", "白名单跳过 block，不再拦截手机号");
+        invocations.Should().Be(2);
+
+        using var blocked = await client.PostAsJsonAsync("/v1/chat/completions", new
+        {
+            model = "demo/model",
+            messages = new[] { new { role = "user", content = "13800138000" } }
+        });
+        blocked.StatusCode.Should().Be(HttpStatusCode.Forbidden, "未命中白名单的平台仍执行 block");
+        invocations.Should().Be(2);
+    }
+
     private sealed class Host(WebApplication app, string apiKey, string password, string configPath) : IAsyncDisposable
     {
         public WebApplication App { get; } = app;
@@ -149,7 +212,7 @@ public sealed class ObservabilityIntegrationTests
             client.DefaultRequestHeaders.Add("Cookie", string.Join("; ", cookies));
         }
 
-        public static async Task<Host> Create()
+        public static async Task<Host> Create(Action<Dictionary<string, string?>>? configure = null)
         {
             var directory = Path.Combine(AppContext.BaseDirectory, "test-data", "observations-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(directory);
@@ -160,14 +223,16 @@ public sealed class ObservabilityIntegrationTests
             builder.Logging.ClearProviders();
             builder.WebHost.UseTestServer();
             builder.Configuration.Sources.Clear();
-            builder.Configuration.AddInMemoryCollection(new Dictionary<string, string?>
+            var settings = new Dictionary<string, string?>
             {
                 ["Database:Path"] = Path.Combine(directory, "test.db"),
                 ["Redis:ConnectionString"] = "",
                 ["Auth:Admin:Users:0:Username"] = "test-admin",
                 ["Auth:Admin:Users:0:Password"] = password,
                 ["Auth:ApiKey:Key"] = apiKey
-            }).AddJsonFile(path, optional: true, reloadOnChange: false);
+            };
+            configure?.Invoke(settings);
+            builder.Configuration.AddInMemoryCollection(settings).AddJsonFile(path, optional: true, reloadOnChange: false);
             builder.Services.Configure<AuthOptions>(builder.Configuration.GetSection("Auth"));
             builder.Services.Configure<AppearanceOptions>(builder.Configuration.GetSection("Appearance"));
             builder.Services.Configure<LogRetentionOptions>(builder.Configuration.GetSection("Logging"));

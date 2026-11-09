@@ -23,7 +23,7 @@ export interface ModelMapping { id: string; name: string; enabled: boolean; targ
 export interface PageResult<T> { items: T[]; page: number; pageSize: number; total: number; totalPages: number }
 export type PrivacyAction = 'off' | 'warn' | 'block' | 'redact'
 export interface PrivacyCustomRule { id: string; name: string; pattern: string; enabled: boolean; action: PrivacyAction | null }
-export interface PrivacySettings { enabled: boolean; dryRun: boolean; defaultAction: PrivacyAction; categoryActions: Record<string, PrivacyAction>; customRules: PrivacyCustomRule[] }
+export interface PrivacySettings { enabled: boolean; dryRun: boolean; defaultAction: PrivacyAction; categoryActions: Record<string, PrivacyAction>; customRules: PrivacyCustomRule[]; whitelistPlugins?: string[] }
 export interface PrivacyHit { ruleId: string; category: string; action: PrivacyAction; count: number; samples: string[] }
 export interface PrivacyReport { dryRun: boolean; blocked: boolean; redactions: number; hits: PrivacyHit[]; error: string | null }
 export interface PrivacySummary { inspected: number; matched: number; blocked: number; dryRun: number; redactions: number; categories: { category: string; hits: number }[] }

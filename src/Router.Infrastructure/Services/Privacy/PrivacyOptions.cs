@@ -11,6 +11,8 @@ public sealed class PrivacyOptions
     public string DefaultAction { get; set; } = "warn";
     public Dictionary<string, string> CategoryActions { get; set; } = new(StringComparer.Ordinal);
     public List<PrivacyCustomRule> CustomRules { get; set; } = [];
+    /// <summary>入口插件 Key 或平台前缀；命中时跳过 block 规则，脱敏和告警仍执行。</summary>
+    public List<string> WhitelistPlugins { get; set; } = [];
 
     /// <summary>请求快照拥有自己的配置副本。</summary>
     public PrivacyOptions Clone() => JsonSerializer.Deserialize<PrivacyOptions>(JsonSerializer.Serialize(this))!;
@@ -64,7 +66,21 @@ public sealed class PrivacyPolicy
             || source.CategoryActions.Any(pair => !Categories.Contains(pair.Key, StringComparer.Ordinal)
                 || !Actions.Contains(pair.Value, StringComparer.Ordinal)))
             throw new ArgumentException("隐私分类配置无效，或自定义规则超过 100 条。");
+        if (source.WhitelistPlugins is null || source.WhitelistPlugins.Count > 50)
+            throw new ArgumentException("插件白名单最多 50 项。");
+        var whitelist = new List<string>(source.WhitelistPlugins.Count);
+        var whitelistKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in source.WhitelistPlugins)
+        {
+            var value = entry?.Trim() ?? "";
+            if (value.Length is < 1 or > 128
+                || !value.All(character => char.IsAsciiLetterOrDigit(character) || character is '.' or '-' or '_')
+                || !whitelistKeys.Add(value))
+                throw new ArgumentException("插件白名单项须为 1–128 个英文字母、数字或 . _ -，且不能重复。");
+            whitelist.Add(value);
+        }
         var options = source.Clone();
+        options.WhitelistPlugins = whitelist;
         var rules = BuiltIns.Select(rule => new PrivacyRule("builtin." + rule.Category, rule.Category, rule.Name,
             options.CategoryActions.GetValueOrDefault(rule.Category, options.DefaultAction),
             Compile(rule.Pattern, 500))).ToList();
@@ -88,6 +104,15 @@ public sealed class PrivacyPolicy
         }
         return new(options, rules.Where(rule => rule.Action != "off").ToArray());
     }
+
+    /// <summary>直接入口或真实回环转发来源命中白名单时，调用方可以跳过 block 规则。</summary>
+    public bool IsWhitelisted(string? platform, string? pluginKey, string? forwardedPlugin = null)
+        => Matches(platform) || Matches(pluginKey) || Matches(forwardedPlugin);
+
+    private bool Matches(string? value)
+        => !string.IsNullOrWhiteSpace(value)
+            && Options.WhitelistPlugins.Any(entry =>
+                string.Equals(entry, value.Trim(), StringComparison.OrdinalIgnoreCase));
 
     private static Regex Compile(string pattern, int timeoutMs)
         => new(pattern, RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(timeoutMs));

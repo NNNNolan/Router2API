@@ -1,7 +1,7 @@
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { QueryClient, VueQueryPlugin } from '@tanstack/vue-query'
 import { createMemoryHistory, createRouter } from 'vue-router'
-import { NButton, NInput, NTabs } from 'naive-ui'
+import { NButton, NInput, NSelect, NTabs } from 'naive-ui'
 import { afterEach, expect, it, vi } from 'vitest'
 import { api, type ObservedRequest, type PrivacySettings, type TraceStage } from '@/services/api'
 import PrivacyPage from './PrivacyPage.vue'
@@ -21,6 +21,10 @@ it('护栏关闭状态仍能编辑规则和使用测试，语音边界始终可�
   vi.spyOn(api, 'privacySettings').mockResolvedValue({ enabled: false, dryRun: true, defaultAction: 'warn', categoryActions: {}, customRules: [] })
   vi.spyOn(api, 'privacySummary').mockResolvedValue({ inspected: 0, matched: 0, blocked: 0, dryRun: 0, redactions: 0, categories: [] })
   vi.spyOn(api, 'privacyEvents').mockResolvedValue(page)
+  vi.spyOn(api, 'platforms').mockResolvedValue([
+    { name: 'Purge', pluginKey: 'power.purge', displayName: 'Power.Purge', probeEndpoint: null, enabled: true },
+    { name: 'demo', pluginKey: 'demo', displayName: 'Demo', probeEndpoint: null, enabled: false },
+  ])
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   view = mount(PrivacyPage, { global: { plugins: [[VueQueryPlugin, { queryClient: client }]], renderStubDefaultSlot: true, stubs } })
   await flushPromises()
@@ -30,6 +34,12 @@ it('护栏关闭状态仍能编辑规则和使用测试，语音边界始终可�
   view.getComponent(NTabs).vm.$emit('update:value', 'rules')
   await flushPromises()
   expect(view.text()).toContain('保存设置')
+  const whitelist = view.findAllComponents(NSelect).find(select => select.props('placeholder') === '选择插件 Key 或平台入口')
+  expect(whitelist).toBeTruthy()
+  const options = JSON.stringify(whitelist!.props('options'))
+  expect(options).toContain('power.purge')
+  expect(options).toContain('Purge')
+  expect(options).toContain('已停用')
   view.getComponent(NTabs).vm.$emit('update:value', 'tester')
   await flushPromises()
   expect(view.text()).toContain('检测文本')
@@ -48,6 +58,7 @@ it('HTTP 环境缺少 randomUUID 时仍能连续添加、编辑并保存唯一�
   })
   vi.spyOn(api, 'privacySummary').mockResolvedValue({ inspected: 0, matched: 0, blocked: 0, dryRun: 0, redactions: 0, categories: [] })
   vi.spyOn(api, 'privacyEvents').mockResolvedValue(page)
+  vi.spyOn(api, 'platforms').mockResolvedValue([])
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   view = mount(PrivacyPage, { global: { plugins: [[VueQueryPlugin, { queryClient: client }]], renderStubDefaultSlot: true, stubs } })
   await flushPromises()

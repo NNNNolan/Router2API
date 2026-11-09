@@ -20,8 +20,36 @@ function bounds() {
 const settings = useQuery({ queryKey: ['privacy-settings'], queryFn: api.privacySettings })
 const draft = ref<PrivacySettings>()
 watch(settings.data, value => {
-  if (value) draft.value = { ...value, categoryActions: { ...value.categoryActions }, customRules: value.customRules.map(rule => ({ ...rule })) }
+  if (value) draft.value = { ...value, categoryActions: { ...value.categoryActions }, customRules: value.customRules.map(rule => ({ ...rule })), whitelistPlugins: [...(value.whitelistPlugins ?? [])] }
 }, { immediate: true })
+const whitelist = computed({
+  get: () => draft.value?.whitelistPlugins ?? [],
+  set: value => { if (draft.value) draft.value.whitelistPlugins = value },
+})
+const platforms = useQuery({ queryKey: ['platforms'], queryFn: api.platforms })
+const whitelistOptions = computed(() => {
+  const items = platforms.data.value ?? []
+  const plugins = [...new Set(items.map(item => item.pluginKey).filter(Boolean))].sort((left, right) => left.localeCompare(right, 'zh-CN'))
+  const known = new Set([...plugins, ...items.map(item => item.name)])
+  const missing = whitelist.value.filter(value => !known.has(value))
+  const options: { type: 'group'; key: string; label: string; children: { label: string; value: string }[] }[] = []
+  if (plugins.length) options.push({
+    type: 'group', key: 'plugins', label: '插件 Key（跳过该插件所有入口的 block）',
+    children: plugins.map(value => ({ label: value, value })),
+  })
+  if (items.length) options.push({
+    type: 'group', key: 'platforms', label: '平台入口',
+    children: items.map(item => ({
+      value: item.name,
+      label: `${item.displayName && item.displayName !== item.name ? `${item.displayName}（${item.name}）` : item.name}${item.enabled ? '' : ' · 已停用'}`,
+    })).sort((left, right) => left.label.localeCompare(right.label, 'zh-CN')),
+  })
+  if (missing.length) options.push({
+    type: 'group', key: 'saved', label: '已保存但当前未注册',
+    children: missing.map(value => ({ label: value, value })),
+  })
+  return options
+})
 const summary = useQuery({ queryKey: computed(() => ['privacy-summary', range.value]), queryFn: () => api.privacySummary(bounds()), refetchInterval: 60_000 })
 const events = useQuery({ queryKey: computed(() => ['privacy-events', range.value, page.value]), queryFn: () => api.privacyEvents({ ...bounds(), page: page.value }), refetchInterval: 30_000 })
 watch(range, () => { page.value = 1 })
@@ -29,7 +57,7 @@ const saving = ref(false)
 async function save() {
   if (!draft.value) return
   saving.value = true
-  try { draft.value = await api.savePrivacySettings(draft.value); await settings.refetch(); message.success('隐私护栏设置已保存') }
+  try { draft.value = await api.savePrivacySettings({ ...draft.value, whitelistPlugins: draft.value.whitelistPlugins ?? [] }); await settings.refetch(); message.success('隐私护栏设置已保存') }
   catch (error) { message.error(error instanceof Error ? error.message : '设置保存失败') }
   finally { saving.value = false }
 }
@@ -99,6 +127,13 @@ const columns: DataTableColumns<ObservedRequest> = [
           <div class="privacy-switch-row"><div><strong>启用隐私护栏</strong><p class="metric-note">默认关闭，不改变升级前的请求行为。</p></div><NSwitch v-model:value="draft.enabled" aria-label="启用隐私护栏" /></div>
           <div class="privacy-switch-row"><div><strong>仅检测模式</strong><p class="metric-note">只检测和记录，不阻断、不修改正文。确认规则后再关闭此开关。</p></div><NSwitch v-model:value="draft.dryRun" aria-label="仅检测模式" /></div>
           <NFormItem label="全局默认动作"><NSelect v-model:value="draft.defaultAction" :options="privacyActions" /></NFormItem>
+          <NFormItem label="插件白名单（跳过 block）">
+            <NSelect v-model:value="whitelist" multiple filterable :options="whitelistOptions" :loading="platforms.isPending.value" placeholder="选择插件 Key 或平台入口" />
+          </NFormItem>
+          <NAlert v-if="platforms.isError.value" type="warning" :show-icon="false" class="mt-16">
+            插件列表加载失败，当前仅保留已保存项。<NButton text type="primary" @click="platforms.refetch()">重新加载</NButton>
+          </NAlert>
+          <p class="metric-note">白名单只跳过 block；脱敏和告警仍照常执行，回环转发会沿用来源插件身份。留空表示不跳过任何插件。</p>
         </NCard>
         <NCard title="分类动作" :bordered="false" class="settings-card mb-20">
           <div class="privacy-category-grid">

@@ -4,8 +4,8 @@ using System.Text.RegularExpressions;
 
 namespace Router.Infrastructure.Services.Privacy;
 
-/// <summary>每次请求的独立检测器。命中和时间预算耗尽均显式失败，不能解释成未命中。</summary>
-public sealed class PrivacyInspection(PrivacyPolicy policy) : IDisposable
+/// <summary>每次请求的独立检测器。白名单跳过 block 规则，其余规则与失败边界保持不变。</summary>
+public sealed class PrivacyInspection(PrivacyPolicy policy, bool skipBlock = false) : IDisposable
 {
     private const int MatchLimit = 1024;
     private const int TextLimit = 16 * 1024 * 1024;
@@ -26,7 +26,9 @@ public sealed class PrivacyInspection(PrivacyPolicy policy) : IDisposable
     public IReadOnlyDictionary<string, string> RestoreMap => _originals;
     public bool DryRun => policy.Options.DryRun;
     public bool CanRedact => policy.Rules.Any(rule => rule.Action == "redact");
-    public bool Blocked => _blocked && !DryRun;
+    public bool SkipBlock { get; } = skipBlock;
+    public bool Failed => _error is not null;
+    public bool Blocked => !SkipBlock && _blocked && !DryRun && !Failed;
 
     /// <summary>扫描一个已经过协议边界选择的文本，不扫描结构标识或二进制。</summary>
     public string Inspect(string text)
@@ -40,6 +42,7 @@ public sealed class PrivacyInspection(PrivacyPolicy policy) : IDisposable
             var textRanges = TextRanges(text);
             foreach (var rule in policy.Rules)
             {
+                if (SkipBlock && rule.Action == "block") continue;
                 foreach (var (start, length) in textRanges)
                 {
                     for (var match = rule.Regex.Match(text, start, length); match.Success; match = match.NextMatch())
@@ -88,7 +91,7 @@ public sealed class PrivacyInspection(PrivacyPolicy policy) : IDisposable
     }
 
     /// <summary>持久化结果只含聚合和掩码；不会暴露还原映射。</summary>
-    public PrivacyReport Report() => new(DryRun, Blocked, DryRun || Blocked ? 0 : _originals.Count,
+    public PrivacyReport Report() => new(DryRun, Blocked, Failed || DryRun || Blocked ? 0 : _originals.Count,
         _hits.Select(pair => new PrivacyHit(pair.Key, pair.Value[0].Category, pair.Value[0].Action, pair.Value.Count,
             pair.Value.Select(hit => hit.Sample).Distinct(StringComparer.Ordinal).Take(3).ToArray())).ToArray(), _error);
 

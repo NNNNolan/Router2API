@@ -31,6 +31,10 @@ public sealed class RouterPipeline(
         var stopwatch = Stopwatch.StartNew();
         var requestedModel = context.Request.Model;
         var trace = new RequestTrace(context.Request.Endpoint);
+        var hasRouted = router.TryResolve(requestedModel, out var routedPlatform, out var routedModel);
+        var routedPluginKey = hasRouted ? platforms.Get(routedPlatform)?.PluginKey ?? routedPlatform : null;
+        var httpContext = context.Services?.GetService(typeof(IHttpContextAccessor)) as IHttpContextAccessor;
+        var isLoopback = httpContext?.HttpContext is { } current && RawConnection.IsLoopback(current);
         PrivacyInspection? inspection = null;
         PrivacyReport? privacyReport = null;
         var started = false;
@@ -42,7 +46,7 @@ public sealed class RouterPipeline(
         {
             using (var stage = RequestTrace.Measure("privacy"))
             {
-                inspection = privacy?.Begin(context.Request);
+                inspection = privacy?.Begin(context.Request, routedPlatform, routedPluginKey, isLoopback);
                 if (inspection is not null)
                 {
                     try { context.Request = PrivacyRequestGuard.Apply(context.Request, inspection); }
@@ -58,6 +62,7 @@ public sealed class RouterPipeline(
                 }
                 else stage?.SetResult("disabled");
             }
+            PrivacyForwarding.Clear(context.Request);
             context.Items["RequestedModel"] = requestedModel;
             ModelMapping? mapping;
             using (RequestTrace.Measure("routing"))
@@ -77,7 +82,12 @@ public sealed class RouterPipeline(
             }
             using (RequestTrace.Measure("routing"))
             {
-                platform = ResolvePlatform(requestedModel, out normalizedModel);
+                if (hasRouted)
+                {
+                    platform = routedPlatform;
+                    normalizedModel = routedModel;
+                }
+                else platform = ResolvePlatform(requestedModel, out normalizedModel);
                 context.SelectedPlatform = platform;
                 context.PluginKey = platforms.Get(platform)?.PluginKey ?? platform;
                 context.Request.Model = normalizedModel;
@@ -87,14 +97,26 @@ public sealed class RouterPipeline(
 
             var registration = platforms.Get(platform)
                 ?? throw new InvalidOperationException($"platform '{platform}' is not registered");
-            var result = await attempts.ExecuteAsync(
-                registration.PluginKey,
-                platform,
-                registration.Terminal,
-                context.Request,
-                context.TraceId,
-                context.TestOverrides,
-                context.CancellationToken);
+            var relaySource = privacy?.IsWhitelisted(platform, registration.PluginKey) == true;
+            if (relaySource)
+                PrivacyForwarding.Mark(context.Request,
+                    privacy!.IsWhitelisted(platform, null) ? platform : registration.PluginKey);
+            PluginInvocationResult result;
+            try
+            {
+                result = await attempts.ExecuteAsync(
+                    registration.PluginKey,
+                    platform,
+                    registration.Terminal,
+                    context.Request,
+                    context.TraceId,
+                    context.TestOverrides,
+                    context.CancellationToken);
+            }
+            finally
+            {
+                if (relaySource) PrivacyForwarding.Clear(context.Request);
+            }
             context.Response = result.Response;
             context.AttemptDetails = result.AttemptDetails ?? [];
             usageTracker = new RequestUsageTracker(context.Request, result.Response);
@@ -120,7 +142,7 @@ public sealed class RouterPipeline(
         }
         finally
         {
-            if (inspection is not null && inspection.RestoreMap.Count > 0 && !inspection.Blocked && context.Response is { } guarded)
+            if (inspection is not null && !inspection.Failed && inspection.RestoreMap.Count > 0 && !inspection.Blocked && context.Response is { } guarded)
             {
                 using var stage = RequestTrace.Measure("response.restore");
                 try { context.Response = PrivacyResponseRestorer.Restore(guarded, inspection.RestoreMap, context.Request.Endpoint); }
@@ -257,6 +279,10 @@ public sealed class RouterPipeline(
             context.SelectedPlatform = registration.Name;
             context.PluginKey = registration.PluginKey;
             executedRequest = ModelMappingRequest.Create(context.Request, target.Model);
+            var relaySource = privacy?.IsWhitelisted(target.Platform, target.PluginKey) == true;
+            if (relaySource)
+                PrivacyForwarding.Mark(executedRequest,
+                    privacy!.IsWhitelisted(target.Platform, null) ? target.Platform : target.PluginKey);
             PluginInvocationResult result;
             try
             {
@@ -273,6 +299,10 @@ public sealed class RouterPipeline(
             {
                 CompleteMappingTarget(invocation, mapping, target, false);
                 throw;
+            }
+            finally
+            {
+                if (relaySource) PrivacyForwarding.Clear(executedRequest);
             }
             var targetDetails = result.AttemptDetails ?? [];
             AddDetails(targetDetails, label);

@@ -51,6 +51,7 @@ builder.Services.AddOptions<AppearanceOptions>()
 builder.Services.AddSingleton<PasswordHasher>();
 builder.Services.AddSingleton<AdminAuthService>();
 builder.Services.AddSingleton<ApiKeyService>();
+builder.Services.AddHttpContextAccessor();
 builder.Services.AddSingleton<IConfigFileService, ConfigFileService>();
 builder.Services.AddOptions<PrivacyOptions>()
     .Bind(builder.Configuration.GetSection("Privacy"));
@@ -96,6 +97,11 @@ app.Services.GetRequiredService<DatabaseInitializer>().Initialize();
 var catalog = app.Services.GetRequiredService<PluginCatalog>();
 await catalog.ReloadAsync(null);
 
+app.Use((context, next) =>
+{
+    RawConnection.Capture(context);
+    return next(context);
+});
 app.UseForwardedHeaders();
 app.UseResponseCompression();
 app.UseMiddleware<Router.Host.Web.NormalizeDuplicateContentTypeMiddleware>();
