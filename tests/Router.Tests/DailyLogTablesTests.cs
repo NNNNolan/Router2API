@@ -89,6 +89,24 @@ public sealed class DailyLogTablesTests
         client.Queryable<ResourceEventEntity>().AS("resource_events").Count().Should().Be(1);
     }
 
+    [TestMethod]
+    public void EmptyRangeProducesValidSourceAndZeroPrivacySummary()
+    {
+        var database = Database();
+        LogDatabaseTestHelper.Initializer(database).Initialize();
+        var from = new DateTimeOffset(2000, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        var to = from.AddDays(1);
+        using (var db = database.CreateClient())
+        {
+            var source = DailyLogTables.Source<RequestLogEntity>(db, from, to);
+            db.Ado.SqlQuery<long>($"SELECT COUNT(*) FROM {source}").Single().Should().Be(0);
+        }
+
+        var summary = new RequestObservationsService(database).PrivacySummary(from, to);
+        summary.Inspected.Should().Be(0);
+        summary.Categories.Should().BeEmpty();
+    }
+
     private static SqlSugarDatabase Database() => new(Options.Create(new DatabaseOptions
     {
         Path = Path.Combine(AppContext.BaseDirectory, "test-data", $"daily-{Guid.NewGuid():N}.db")

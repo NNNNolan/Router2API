@@ -17,7 +17,18 @@ public static class DailyLogTables
 
     /// <summary>生成时间裁剪的 UNION ALL 子查询。表名仅来自 ORM 分表元数据。</summary>
     public static string Source<T>(SqlSugarClient db, DateTimeOffset? from = null, DateTimeOffset? to = null) where T : class, new()
-        => "(" + Query<T>(db, from, to).ToSql().Key + ")";
+        => db.SplitHelper<T>().GetTables().Any(table => InRange(table.TableName, from, to))
+            ? "(" + Query<T>(db, from, to).ToSql().Key + ")"
+            : EmptySource<T>(db);
+
+    /// <summary>SqlSugar 在无匹配分表时生成注释占位符；显式构造同列空集合，保证外层聚合 SQL 可执行。</summary>
+    private static string EmptySource<T>(SqlSugarClient db) where T : class, new()
+    {
+        var columns = db.EntityMaintenance.GetEntityInfo<T>().Columns
+            .Where(column => !column.IsIgnore)
+            .Select(column => $"NULL AS [{column.DbColumnName}]");
+        return "(SELECT " + string.Join(", ", columns) + " WHERE 0)";
+    }
 
     /// <summary>范围为 UTC 半开区间；分页和排序在合并各日表后应用。</summary>
     public static ISugarQueryable<T> Query<T>(SqlSugarClient db, DateTimeOffset? from = null, DateTimeOffset? to = null) where T : class, new()
